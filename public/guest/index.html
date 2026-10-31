@@ -14,12 +14,15 @@
   :root{--blue:#006df6;--ink:#0a0a0a;--mut:#5b6474;--bg:#f3f5f8;--card:#fff;--line:#dde2ea}
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:17px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+  body{height:100dvh}
   body{display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
   header{display:flex;align-items:center;gap:14px;padding:14px 22px;background:#fff;border-bottom:1px solid var(--line)}
   header .logo{height:30px}
   header .ev{margin-left:auto;color:var(--mut);font-size:14px;text-transform:uppercase;letter-spacing:.6px}
   main{flex:1;min-height:0;overflow:auto;padding:22px;display:flex;flex-direction:column}
-  .screen{display:none;flex:1;flex-direction:column}
+  main.cam-mode{overflow:hidden;padding:10px 22px}
+  #s-cam{height:100%;min-height:0}
+  .screen{display:none;flex:1;flex-direction:column;min-height:0}
   .screen.on{display:flex}
   h1{font-size:30px;margin:0 0 6px;letter-spacing:-.3px}
   .sub{color:var(--mut);margin:0 0 20px;font-size:18px}
@@ -41,15 +44,17 @@
   .btn.primary{background:var(--blue);color:#fff;border-color:var(--blue)}
   .btn:disabled{opacity:.4}
   .cam{flex:1;position:relative;background:#000;border-radius:18px;overflow:hidden;min-height:0;display:flex;align-items:center;justify-content:center}
+  #s-cam .crumb{flex:0 0 auto}#s-cam .bar{flex:0 0 auto;padding-top:12px}
   .cam video,.cam img,.cam canvas{max-width:100%;max-height:100%;object-fit:contain}
-  .cam video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+  .cam img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+  .cam video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
   .count{position:absolute;top:18px;left:50%;transform:translateX(-50%);min-width:92px;padding:6px 20px;border-radius:999px;background:rgba(0,0,0,.55);color:#fff;font:800 56px/1.1 system-ui;text-align:center;display:none;letter-spacing:1px}
   .count.on{display:block}
   .count.go{background:rgba(0,109,246,.85);font-size:34px;padding:14px 26px}
   .tip{position:absolute;top:18px;left:50%;transform:translateX(-50%);padding:8px 16px;border-radius:999px;background:rgba(0,0,0,.5);color:#fff;font:600 16px system-ui;white-space:nowrap}
   .flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
   .flash.on{animation:fl .35s ease-out}@keyframes fl{0%{opacity:.9}100%{opacity:0}}
-  .guide{position:absolute;left:50%;top:50%;width:46%;max-width:380px;aspect-ratio:3/4;transform:translate(-50%,-50%);pointer-events:none;border:3px dashed rgba(255,255,255,.55);border-radius:50%/48%}
+  .guide{position:absolute;left:50%;top:48%;height:58%;max-height:520px;aspect-ratio:3/4;transform:translate(-50%,-50%);pointer-events:none;border:3px dashed rgba(255,255,255,.55);border-radius:50%/48%}
   .snap{position:absolute;bottom:26px;left:50%;transform:translateX(-50%);width:140px;height:140px;border-radius:50%;background:#fff;border:8px solid rgba(255,255,255,.45);box-shadow:0 6px 24px rgba(0,0,0,.45);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}
   .snap span{font:800 16px/1.1 system-ui;color:var(--blue);letter-spacing:.5px}
   .snap:active{transform:translateX(-50%) scale(.95)}
@@ -110,7 +115,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const screens = ['s-theme', 's-who', 's-cam', 's-status'];
-  const show = id => { for (const s of screens) $(s).classList.toggle('on', s === id); setTimeout(() => { if (typeof bump === 'function') bump(); }, 0); };
+  const show = id => { for (const s of screens) $(s).classList.toggle('on', s === id); document.querySelector('main').classList.toggle('cam-mode', id === 's-cam'); setTimeout(() => { if (typeof bump === 'function') bump(); }, 0); };
   const S = { themes: [], theme: null, who: null, g: {}, blob: null, job: null, stream: null };
   const LABEL = { male: 'Male', female: 'Female' };
 
@@ -158,11 +163,11 @@
     $('shot').style.display = 'none'; $('video').style.display = ''; $('guide').style.display = ''; $('shutter').style.display = ''; $('shutter').disabled = false; $('camTip').style.display = ''; $('count').className = 'count'; $('camBar').style.display = ''; $('shotBar').style.display = 'none'; S.blob = null;
     if (streamAlive()) { $('video').srcObject = S.stream; return; } S.stream = null;
     // 4:3 at the front camera's native framing; the <video> is shown cover-cropped so the face fills the screen
-    const tries = [
-      { video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 }, aspectRatio: { ideal: 4 / 3 } }, audio: false },
-      { video: { facingMode: 'user' }, audio: false },
-      { video: true, audio: false }
-    ];
+    const portrait = window.innerHeight > window.innerWidth; S.camPortrait = portrait;
+    // ask the front camera for the orientation we're in, so the feed fills the screen instead of being letterboxed
+    const tries = portrait
+      ? [{ video: { facingMode: 'user', width: { ideal: 960 }, height: { ideal: 1280 }, aspectRatio: { ideal: 3 / 4 } }, audio: false }, { video: { facingMode: 'user' }, audio: false }, { video: true, audio: false }]
+      : [{ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 }, aspectRatio: { ideal: 4 / 3 } }, audio: false }, { video: { facingMode: 'user' }, audio: false }, { video: true, audio: false }];
     for (const c of tries) { try { S.stream = await navigator.mediaDevices.getUserMedia(c); break; } catch (e) { S.camErr = e; } }
     if (S.stream) { $('video').srcObject = S.stream; $('camTip').textContent = 'Get your face in the oval, then tap the button'; }
     else { $('shutter').style.display = 'none'; $('guide').style.display = 'none'; $('camTip').textContent = 'Camera not available — use "Use a photo instead"'; }
@@ -172,6 +177,8 @@
   window.addEventListener('pagehide', () => { if (S.stream) S.stream.getTracks().forEach(t => t.stop()); });
   // if the OS suspends the track (iPad sleep), reopen it next time the camera screen shows
   function streamAlive() { return S.stream && S.stream.getTracks().some(t => t.readyState === 'live'); }
+  // if the iPad is rotated, re-request the camera in the new orientation (permission is already granted, so no prompt)
+  window.addEventListener('resize', () => { const portrait = window.innerHeight > window.innerWidth; if (S.stream && portrait !== S.camPortrait && !S.counting) { S.stream.getTracks().forEach(t => t.stop()); S.stream = null; if ($('s-cam').classList.contains('on') && $('video').style.display !== 'none') openCam(); } });
   function capture() {
     const v = $('video'); const c = document.createElement('canvas');
     // crop the captured frame to what the guest saw on screen (object-fit: cover)
