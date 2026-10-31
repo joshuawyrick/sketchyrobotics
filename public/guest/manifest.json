@@ -1,0 +1,1 @@
+{ "name": "Sketchy Robotics", "short_name": "Sketchy", "start_url": "/", "display": "standalone", "orientation": "any", "background_color": "#f3f5f8", "theme_color": "#006df6", "icons": [{ "src": "icon.png", "sizes": "512x512", "type": "image/png" }] }

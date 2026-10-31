@@ -1,0 +1,11 @@
+run = "node server/index.js"
+entrypoint = "server/index.js"
+modules = ["nodejs-22"]
+
+[deployment]
+run = ["node", "server/index.js"]
+deploymentTarget = "autoscale"
+
+[[ports]]
+localPort = 3000
+externalPort = 80

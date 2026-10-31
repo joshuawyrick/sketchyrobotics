@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Sketchy">
+<meta name="theme-color" content="#006df6">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.png">
+<title>Sketchy Robotics</title>
+<style>
+  :root{--blue:#006df6;--ink:#0a0a0a;--mut:#5b6474;--bg:#f3f5f8;--card:#fff;--line:#dde2ea}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:17px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+  body{display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+  header{display:flex;align-items:center;gap:14px;padding:14px 22px;background:#fff;border-bottom:1px solid var(--line)}
+  header .logo{height:30px}
+  header .ev{margin-left:auto;color:var(--mut);font-size:14px;text-transform:uppercase;letter-spacing:.6px}
+  main{flex:1;min-height:0;overflow:auto;padding:22px;display:flex;flex-direction:column}
+  .screen{display:none;flex:1;flex-direction:column}
+  .screen.on{display:flex}
+  h1{font-size:30px;margin:0 0 6px;letter-spacing:-.3px}
+  .sub{color:var(--mut);margin:0 0 20px;font-size:18px}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:18px}
+  .tile{background:var(--card);border:2px solid var(--line);border-radius:16px;overflow:hidden;cursor:pointer;text-align:center;transition:transform .08s}
+  .tile:active{transform:scale(.97)}
+  .tile img{width:100%;aspect-ratio:1;object-fit:cover;display:block;background:#e9eef7}
+  .tile .ph{width:100%;aspect-ratio:1;display:flex;align-items:center;justify-content:center;background:#e9eef7;color:var(--mut);font-size:48px}
+  .tile .nm{padding:12px;font-weight:700;font-size:19px}
+  .choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin:10px 0 26px}
+  .choice{background:#fff;border:2px solid var(--line);border-radius:16px;padding:26px 14px;font-size:22px;font-weight:700;text-align:center;cursor:pointer}
+  .choice.on{border-color:var(--blue);background:#eaf2ff;color:var(--blue)}
+  .choice small{display:block;font-weight:500;font-size:14px;color:var(--mut);margin-top:4px}
+  .pair{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px 16px;margin-bottom:14px}
+  .pair h3{margin:0 0 10px;font-size:16px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
+  .pair .choices{margin:0}
+  .bar{display:flex;gap:12px;margin-top:auto;padding-top:18px}
+  .btn{flex:1;border:0;border-radius:14px;padding:18px;font:700 20px system-ui;cursor:pointer;background:#fff;color:var(--ink);border:2px solid var(--line)}
+  .btn.primary{background:var(--blue);color:#fff;border-color:var(--blue)}
+  .btn:disabled{opacity:.4}
+  .cam{flex:1;position:relative;background:#000;border-radius:18px;overflow:hidden;min-height:0;display:flex;align-items:center;justify-content:center}
+  .cam video,.cam img,.cam canvas{max-width:100%;max-height:100%;object-fit:contain}
+  .cam video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+  .guide{position:absolute;inset:0;pointer-events:none;border:2px dashed rgba(255,255,255,.35);margin:7%;border-radius:50% 50% 45% 45%/40% 40% 60% 60%}
+  .shutter{position:absolute;bottom:22px;left:50%;transform:translateX(-50%);width:84px;height:84px;border-radius:50%;background:#fff;border:6px solid rgba(255,255,255,.5);box-shadow:0 0 0 3px #000 inset;cursor:pointer}
+  .status{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:12px}
+  .big{font-size:96px;font-weight:800;color:var(--blue);line-height:1}
+  .art{max-height:52vh;max-width:100%;border:1px solid var(--line);border-radius:12px;background:#fff}
+  .spin{width:54px;height:54px;border:6px solid #dbe5f5;border-top-color:var(--blue);border-radius:50%;animation:r 1s linear infinite}
+  @keyframes r{to{transform:rotate(360deg)}}
+  .err{background:#fde8eb;color:#8f1d2b;border:1px solid #f3b4bd;padding:12px 16px;border-radius:12px}
+  .crumb{color:var(--mut);font-size:15px;margin-bottom:8px}
+</style>
+</head>
+<body>
+<header>
+  <svg class="logo" viewBox="60 150 1870 400" xmlns="http://www.w3.org/2000/svg"><g id="L"></g></svg>
+  <span class="ev" id="evName"></span>
+</header>
+<main>
+  <!-- 1 style -->
+  <section class="screen on" id="s-theme">
+    <h1>Pick your style</h1><p class="sub">Tap a style, snap a selfie, and the robot draws you.</p>
+    <div class="tiles" id="tiles"></div>
+  </section>
+  <!-- 2 who -->
+  <section class="screen" id="s-who">
+    <div class="crumb" id="crumb1"></div>
+    <h1>Who's in the picture?</h1>
+    <div class="choices" id="who">
+      <div class="choice" data-w="1">One person</div>
+      <div class="choice" data-w="2">Two people</div>
+      <div class="choice" data-w="pet">Person + pet</div>
+    </div>
+    <div id="genders"></div>
+    <div class="bar"><button class="btn" id="backWho">Back</button><button class="btn primary" id="nextWho" disabled>Next: take photo</button></div>
+  </section>
+  <!-- 3 camera -->
+  <section class="screen" id="s-cam">
+    <div class="crumb" id="crumb2"></div>
+    <div class="cam" id="cam">
+      <video id="video" autoplay playsinline muted></video>
+      <div class="guide" id="guide"></div>
+      <div class="shutter" id="shutter"></div>
+      <img id="shot" style="display:none">
+    </div>
+    <div class="bar" id="camBar"><button class="btn" id="backCam">Back</button><button class="btn" id="fileBtn">Use a photo instead</button><input type="file" id="fileIn" accept="image/*" capture="user" style="display:none"></div>
+    <div class="bar" id="shotBar" style="display:none"><button class="btn" id="retake">Retake</button><button class="btn primary" id="send">Looks good — send it</button></div>
+  </section>
+  <!-- 4 status -->
+  <section class="screen" id="s-status">
+    <div class="status" id="status"></div>
+    <div class="bar"><button class="btn primary" id="again">Next person</button></div>
+  </section>
+</main>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const screens = ['s-theme', 's-who', 's-cam', 's-status'];
+  const show = id => { for (const s of screens) $(s).classList.toggle('on', s === id); };
+  const S = { themes: [], theme: null, who: null, g: {}, blob: null, job: null, stream: null };
+  const LABEL = { male: 'Male', female: 'Female' };
+
+  fetch('logo.svg').then(r => r.text()).then(t => { const m = t.match(/<svg[^>]*>([\s\S]*)<\/svg>/); if (m) document.querySelector('header .logo').innerHTML = m[1]; }).catch(() => {});
+
+  async function loadThemes() {
+    const r = await fetch('/api/themes').then(r => r.json());
+    S.themes = r.themes; $('evName').textContent = r.event || '';
+    const box = $('tiles'); box.innerHTML = '';
+    if (!r.themes.length) box.innerHTML = '<p class="sub">No styles are set up yet. Add one in Admin.</p>';
+    for (const t of r.themes) {
+      const d = document.createElement('div'); d.className = 'tile';
+      d.innerHTML = (t.hasThumb ? `<img src="/api/themes/${t.slug}/thumb?v=${Date.now()}" alt="">` : `<div class="ph">✎</div>`) + `<div class="nm">${t.name}</div>`;
+      d.onclick = () => { S.theme = t; S.who = null; S.g = {}; $('crumb1').textContent = t.name; renderWho(); show('s-who'); };
+      box.appendChild(d);
+    }
+  }
+  function variantKey() {
+    if (S.who === '1') return S.g.a ? `1-${S.g.a}` : null;
+    if (S.who === '2') return (S.g.a && S.g.b) ? `2-${S.g.a}-${S.g.b}` : null;
+    if (S.who === 'pet') return S.g.a ? `pet-${S.g.a}` : null;
+    return null;
+  }
+  function renderWho() {
+    document.querySelectorAll('#who .choice').forEach(c => { c.classList.toggle('on', c.dataset.w === S.who); c.onclick = () => { S.who = c.dataset.w; S.g = {}; renderWho(); }; });
+    const g = $('genders'); g.innerHTML = '';
+    const pair = (key, title) => {
+      const d = document.createElement('div'); d.className = 'pair'; d.innerHTML = `<h3>${title}</h3><div class="choices"></div>`;
+      for (const v of ['male', 'female']) { const c = document.createElement('div'); c.className = 'choice' + (S.g[key] === v ? ' on' : ''); c.textContent = LABEL[v]; c.onclick = () => { S.g[key] = v; renderWho(); }; d.querySelector('.choices').appendChild(c); }
+      g.appendChild(d);
+    };
+    if (S.who === '1') pair('a', 'This person is');
+    if (S.who === '2') { pair('a', 'Person on the LEFT (as you see it on screen)'); pair('b', 'Person on the RIGHT'); }
+    if (S.who === 'pet') pair('a', 'The person is');
+    const k = variantKey(); const ok = k && S.theme.variants.includes(k);
+    $('nextWho').disabled = !ok;
+    if (k && !ok) { const w = document.createElement('p'); w.className = 'err'; w.textContent = 'That combination isn\'t available for this style yet.'; g.appendChild(w); }
+  }
+  $('backWho').onclick = () => show('s-theme');
+  $('nextWho').onclick = () => { $('crumb2').textContent = `${S.theme.name} · ${variantLabel()}`; openCam(); show('s-cam'); };
+  function variantLabel() { const k = variantKey(); return ({ '1-male': 'one male', '1-female': 'one female', '2-male-male': 'two males', '2-female-female': 'two females', '2-male-female': 'male + female', '2-female-male': 'female + male', 'pet-male': 'male + pet', 'pet-female': 'female + pet' })[k] || k; }
+
+  async function openCam() {
+    $('shot').style.display = 'none'; $('video').style.display = ''; $('guide').style.display = ''; $('shutter').style.display = ''; $('camBar').style.display = ''; $('shotBar').style.display = 'none'; S.blob = null;
+    if (S.stream) return;
+    try { S.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1920 }, height: { ideal: 1440 } }, audio: false }); $('video').srcObject = S.stream; }
+    catch (e) { $('shutter').style.display = 'none'; $('guide').style.display = 'none'; }
+  }
+  function closeCam() { if (S.stream) { S.stream.getTracks().forEach(t => t.stop()); S.stream = null; $('video').srcObject = null; } }
+  $('shutter').onclick = () => {
+    const v = $('video'); const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
+    const g = c.getContext('2d'); g.translate(c.width, 0); g.scale(-1, 1); g.drawImage(v, 0, 0); // un-mirror so left/right match what the guest chose
+    c.toBlob(b => { S.blob = b; showShot(URL.createObjectURL(b)); }, 'image/jpeg', 0.92);
+  };
+  $('fileBtn').onclick = () => $('fileIn').click();
+  $('fileIn').onchange = () => { const f = $('fileIn').files[0]; if (f) { S.blob = f; showShot(URL.createObjectURL(f)); } $('fileIn').value = ''; };
+  function showShot(url) { $('shot').src = url; $('shot').style.display = ''; $('video').style.display = 'none'; $('guide').style.display = 'none'; $('shutter').style.display = 'none'; $('camBar').style.display = 'none'; $('shotBar').style.display = ''; }
+  $('retake').onclick = openCam;
+  $('backCam').onclick = () => { closeCam(); show('s-who'); };
+  $('send').onclick = async () => {
+    $('send').disabled = true; $('send').textContent = 'Sending…';
+    const fd = new FormData(); fd.append('photo', S.blob, 'photo.jpg'); fd.append('theme', S.theme.slug); fd.append('variant', variantKey());
+    try {
+      const r = await fetch('/api/jobs', { method: 'POST', body: fd }); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status);
+      S.job = j; closeCam(); show('s-status'); poll();
+    } catch (e) { alert('Could not send: ' + e.message); }
+    $('send').disabled = false; $('send').textContent = 'Looks good — send it';
+  };
+  async function poll() {
+    const st = $('status'); const j = S.job;
+    const r = await fetch('/api/jobs/' + j.id).then(r => r.json()).catch(() => null); if (!r) return setTimeout(poll, 3000);
+    S.job = r;
+    if (r.status === 'pending' || r.status === 'processing') { st.innerHTML = `<div class="spin"></div><h1>Drawing your sketch…</h1><p class="sub">You're <b>#${r.position || '?'}</b> in line. This takes about 30 seconds.</p>`; return setTimeout(poll, 2500); }
+    if (r.status === 'failed') { st.innerHTML = `<div class="err">Sorry — that one didn't work. Please try again.<br><small>${r.error || ''}</small></div>`; return; }
+    st.innerHTML = `<img class="art" src="/api/jobs/${r.id}/art?v=${Date.now()}"><h1>You're #${r.number}</h1><p class="sub">${r.status === 'done' ? 'Drawn! Pick it up at the robot.' : r.status === 'drawing' ? 'The robot is drawing you right now!' : 'Watch the robot — your sketch is <b>#' + (r.position || '?') + '</b> in line.'}</p>`;
+    if (r.status !== 'done') setTimeout(poll, 4000);
+  }
+  $('again').onclick = () => { S.theme = null; S.job = null; loadThemes(); show('s-theme'); };
+  loadThemes(); setInterval(() => { if ($('s-theme').classList.contains('on')) loadThemes(); }, 30000);
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+})();
+</script>
+</body>
+</html>

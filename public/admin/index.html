@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sketchy Robotics — Admin</title>
+<style>
+  :root{--blue:#006df6;--ink:#0a0a0a;--mut:#5b6474;--bg:#eef1f5;--card:#fff;--line:#dde2ea;--bad:#d7263d;--ok:#13a05a}
+  *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:10px 18px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+  header .logo{height:28px}header .t{font-size:12px;letter-spacing:.6px;text-transform:uppercase;color:var(--mut);border-left:1px solid var(--line);padding-left:12px}
+  nav{margin-left:auto;display:flex;gap:4px}nav button{background:none;border:1px solid transparent;padding:7px 12px;border-radius:8px;font:600 13px system-ui;cursor:pointer;color:var(--mut)}nav button.on{background:#eaf2ff;color:var(--blue)}
+  main{max-width:1100px;margin:0 auto;padding:18px}
+  .tab{display:none}.tab.on{display:block}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+  h2{font-size:15px;margin:0 0 10px;text-transform:uppercase;letter-spacing:.5px;color:var(--mut)}
+  button{background:#fff;border:1px solid #c9d1dd;border-radius:7px;padding:7px 12px;font:500 13px system-ui;cursor:pointer}button:hover{border-color:var(--blue)}
+  button.primary{background:var(--blue);color:#fff;border-color:var(--blue)}button.danger{background:var(--bad);color:#fff;border-color:var(--bad)}
+  input[type=text],input[type=number],input[type=password],select,textarea{width:100%;border:1px solid #c9d1dd;border-radius:7px;padding:8px;font:13px system-ui;background:#fff}
+  textarea{min-height:120px;font:13px/1.45 ui-monospace,Menlo,monospace;resize:vertical}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
+  .theme{border:1px solid var(--line);border-radius:12px;overflow:hidden;cursor:pointer;background:#fff;text-align:center}.theme img,.theme .ph{width:100%;aspect-ratio:1;object-fit:cover;background:#e9eef7;display:block}.theme .ph{display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:40px}.theme .nm{padding:8px;font-weight:700}.theme.off{opacity:.5}
+  .theme.on{outline:3px solid var(--blue)}
+  .row{display:flex;gap:10px;align-items:center;margin:8px 0;flex-wrap:wrap}.row label{min-width:170px;color:var(--mut)}
+  .prompt{margin:12px 0}.prompt h3{margin:0 0 4px;font-size:13px}.prompt .cnt{float:right;color:var(--mut);font-weight:400}
+  table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:middle;font-size:13px}th{color:var(--mut);font-weight:600;font-size:12px;text-transform:uppercase}
+  td img{height:56px;border-radius:6px;background:#fff;border:1px solid var(--line)}
+  .pill{display:inline-block;padding:2px 8px;border-radius:10px;font:600 11px system-ui;background:#e9eef7;color:#334}.pill.ready{background:#dcf5e6;color:#0b6b3a}.pill.processing,.pill.pending{background:#fff4d6;color:#6b4e00}.pill.drawing{background:#dbeafe;color:#1e40af}.pill.failed{background:#fde8eb;color:#8f1d2b}.pill.done{background:#e5e7eb;color:#374151}
+  .login{max-width:360px;margin:80px auto}
+  .note{color:var(--mut);font-size:12.5px}
+  .ok{color:var(--ok)}.bad{color:var(--bad)}
+  #testOut img{max-width:100%;border:1px solid var(--line);border-radius:8px;background:#fff}
+</style>
+</head>
+<body>
+<header><svg class="logo" viewBox="60 150 1870 400"></svg><span class="t">Admin</span>
+  <nav id="nav"><button data-t="queue" class="on">Queue</button><button data-t="themes">Themes</button><button data-t="test">Test a prompt</button><button data-t="settings">Settings</button><a href="/studio" target="_blank"><button>Open Plotter Studio ↗</button></a></nav></header>
+<main>
+  <div class="login card" id="login"><h2>Admin password</h2><input type="password" id="pw" placeholder="password"><div class="row" style="margin-top:10px"><button class="primary" id="loginBtn">Sign in</button><span id="loginErr" class="bad"></span></div></div>
+
+  <section class="tab" id="tab-queue">
+    <div class="card"><h2>Queue <span class="note" id="qsum"></span></h2>
+      <table><thead><tr><th>#</th><th>Photo</th><th>Line art</th><th>Style</th><th>Status</th><th>Time</th><th></th></tr></thead><tbody id="qbody"></tbody></table></div>
+  </section>
+
+  <section class="tab" id="tab-themes">
+    <div class="card"><h2>Themes</h2>
+      <div class="grid" id="themeGrid"></div>
+      <div class="row" style="margin-top:12px"><input type="text" id="newName" placeholder="New theme name (e.g. Rockstar)" style="max-width:300px"><button class="primary" id="addTheme">+ Add theme</button></div>
+    </div>
+    <div class="card" id="themeEdit" style="display:none">
+      <h2>Edit theme: <span id="teName"></span></h2>
+      <div class="row"><label>Name</label><input type="text" id="teNameIn" style="max-width:300px"></div>
+      <div class="row"><label>Show on iPad</label><input type="checkbox" id="teEnabled"></div>
+      <div class="row"><label>Order (lower = first)</label><input type="number" id="teOrder" style="max-width:100px"></div>
+      <div class="row"><label>Thumbnail (square image)</label><input type="file" id="teThumb" accept="image/*"><img id="teThumbPrev" style="height:70px;border-radius:8px;border:1px solid var(--line)"></div>
+      <p class="note">Paste the locked-in master prompt for each combination. Leave a box empty and that option won't be offered on the iPad for this theme. Each prompt must stand on its own (style, line weight, white background, no shading…) — the guest's photo is attached as the input image.</p>
+      <div id="prompts"></div>
+      <div class="row"><button class="primary" id="teSave">Save theme</button><button class="danger" id="teDelete">Delete theme</button><span id="teMsg" class="ok"></span></div>
+    </div>
+  </section>
+
+  <section class="tab" id="tab-test">
+    <div class="card"><h2>Test a prompt (does not go to the robot)</h2>
+      <div class="row"><label>Theme</label><select id="tTheme" style="max-width:260px"></select></div>
+      <div class="row"><label>Combination</label><select id="tVar" style="max-width:260px"></select></div>
+      <div class="row"><label>Photo</label><input type="file" id="tPhoto" accept="image/*"></div>
+      <div class="row"><button class="primary" id="tRun">Generate</button><span id="tMsg" class="note"></span></div>
+      <div id="testOut"></div>
+      <p class="note">Happy with it? The result can be sent to the robot queue with the button that appears under the image.</p>
+    </div>
+  </section>
+
+  <section class="tab" id="tab-settings">
+    <div class="card"><h2>OpenAI</h2>
+      <div class="row"><label>API key</label><span id="keyState"></span><span class="note">Set as the Secret <code>OPENAI_API_KEY</code> in Replit.</span></div>
+      <div class="row"><label>Model</label><select id="sModel" style="max-width:260px"><option value="chatgpt-image-latest">chatgpt-image-latest (same as ChatGPT)</option><option value="gpt-image-2">gpt-image-2</option><option value="gpt-image-1.5">gpt-image-1.5</option><option value="gpt-image-1-mini">gpt-image-1-mini (cheapest)</option></select></div>
+      <div class="row"><label>Quality</label><select id="sQuality" style="max-width:200px"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="auto">auto</option></select></div>
+      <div class="row"><label>Output size</label><select id="sSize" style="max-width:200px"><option value="1024x1536">1024×1536 portrait</option><option value="1024x1024">1024×1024 square</option><option value="1536x1024">1536×1024 landscape</option><option value="auto">auto</option></select></div>
+      <div class="row"><label>Input fidelity</label><select id="sFid" style="max-width:200px"><option value="">(model default)</option><option value="high">high — keeps the face closer to the photo (gpt-image-1.5 only)</option><option value="low">low</option></select></div>
+      <div class="row"><label>Photos processed at once</label><input type="number" id="sConc" min="1" max="5" style="max-width:100px"></div>
+    </div>
+    <div class="card"><h2>Event</h2>
+      <div class="row"><label>Event name (shown on iPad)</label><input type="text" id="sEvent" style="max-width:300px"></div>
+      <div class="row"><label>Admin password</label><span class="note">Set as the Secret <code>ADMIN_PASSWORD</code> in Replit (default "sketchy").</span></div>
+      <div class="row"><button class="primary" id="sSave">Save settings</button><span id="sMsg" class="ok"></span></div>
+    </div>
+  </section>
+</main>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  let TOKEN = sessionStorage.getItem('sr.token') || ''; let STATE = null; let editing = null;
+  fetch('/logo.svg').then(r => r.text()).then(t => { const m = t.match(/<svg[^>]*>([\s\S]*)<\/svg>/); if (m) document.querySelector('header .logo').innerHTML = m[1]; }).catch(() => {});
+  const api = async (url, opts = {}) => { opts.headers = Object.assign({ 'x-admin-token': TOKEN }, opts.headers || {}); if (opts.json) { opts.body = JSON.stringify(opts.json); opts.headers['Content-Type'] = 'application/json'; } const r = await fetch(url, opts); const j = await r.json().catch(() => ({})); if (r.status === 401) { showLogin(); throw new Error('login'); } if (!r.ok) throw new Error(j.error || r.status); return j; };
+  function showLogin() { $('login').style.display = ''; document.querySelectorAll('.tab').forEach(t => t.classList.remove('on')); }
+  $('loginBtn').onclick = async () => { try { const r = await api('/api/admin/login', { method: 'POST', json: { password: $('pw').value } }); TOKEN = r.token; sessionStorage.setItem('sr.token', TOKEN); $('login').style.display = 'none'; tab('queue'); } catch (e) { $('loginErr').textContent = 'Wrong password'; } };
+  $('pw').addEventListener('keydown', e => { if (e.key === 'Enter') $('loginBtn').click(); });
+  document.querySelectorAll('#nav button[data-t]').forEach(b => b.onclick = () => tab(b.dataset.t));
+  function tab(t) { document.querySelectorAll('#nav button[data-t]').forEach(b => b.classList.toggle('on', b.dataset.t === t)); document.querySelectorAll('.tab').forEach(s => s.classList.toggle('on', s.id === 'tab-' + t)); refresh(); }
+  async function refresh() {
+    try { STATE = await api('/api/admin/state'); } catch (e) { return; }
+    $('login').style.display = 'none';
+    renderQueue(); renderThemes(); renderSettings(); renderTest();
+  }
+  // ----- queue -----
+  const fmt = ms => { const d = new Date(ms); return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
+  function renderQueue() {
+    const js = STATE.jobs.filter(j => !j.id.startsWith('test-')).slice().reverse();
+    const counts = {}; for (const j of js) counts[j.status] = (counts[j.status] || 0) + 1;
+    $('qsum').textContent = Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(' · ') || 'empty';
+    $('qbody').innerHTML = js.map(j => `<tr>
+      <td><b>#${j.number}</b></td>
+      <td><img src="/api/jobs/${j.id}/photo?token=${encodeURIComponent(TOKEN)}" onerror="this.style.display='none'"></td>
+      <td>${['ready', 'drawing', 'done', 'skipped'].includes(j.status) ? `<a href="/api/jobs/${j.id}/art" target="_blank"><img src="/api/jobs/${j.id}/art?thumb=1"></a>` : ''}</td>
+      <td>${j.themeName}<br><span class="note">${STATE.variants[j.variant] || j.variant}</span></td>
+      <td><span class="pill ${j.status}">${j.status}</span>${j.error ? `<br><span class="bad note">${j.error}</span>` : ''}</td>
+      <td class="note">${fmt(j.createdAt)}</td>
+      <td style="white-space:nowrap">
+        ${j.status === 'failed' || j.status === 'pending' ? `<button data-a="retry" data-id="${j.id}">Retry</button>` : ''}
+        ${['pending', 'ready'].includes(j.status) ? `<button data-a="front" data-id="${j.id}">Move to front</button>` : ''}
+        ${['done', 'skipped', 'failed'].includes(j.status) ? `<button data-a="requeue" data-id="${j.id}">Draw again</button>` : ''}
+        ${['pending', 'ready', 'processing', 'drawing'].includes(j.status) ? `<button data-a="skip" data-id="${j.id}">Skip</button>` : ''}
+        <button data-a="delete" data-id="${j.id}" class="danger">✕</button>
+      </td></tr>`).join('');
+    $('qbody').querySelectorAll('button[data-a]').forEach(b => b.onclick = async () => { if (b.dataset.a === 'delete' && !confirm('Delete this entry?')) return; await api('/api/admin/jobs/' + b.dataset.id, { method: 'POST', json: { action: b.dataset.a } }); refresh(); });
+  }
+  // ----- themes -----
+  function renderThemes() {
+    $('themeGrid').innerHTML = STATE.themes.map(t => `<div class="theme ${t.enabled ? '' : 'off'} ${editing === t.slug ? 'on' : ''}" data-s="${t.slug}">${t.hasThumb ? `<img src="/api/themes/${t.slug}/thumb?v=${Date.now()}">` : '<div class="ph">✎</div>'}<div class="nm">${t.name}</div><div class="note" style="padding:0 8px 8px">${STATE.variantOrder.filter(v => t.prompts[v].trim()).length}/${STATE.variantOrder.length} prompts</div></div>`).join('');
+    $('themeGrid').querySelectorAll('.theme').forEach(d => d.onclick = () => openTheme(d.dataset.s));
+    if (editing) openTheme(editing, true);
+  }
+  function openTheme(slug, keep) {
+    const t = STATE.themes.find(x => x.slug === slug); if (!t) { editing = null; $('themeEdit').style.display = 'none'; return; }
+    editing = slug; $('themeEdit').style.display = '';
+    if (!keep) { $('teName').textContent = t.name; $('teNameIn').value = t.name; $('teEnabled').checked = t.enabled !== false; $('teOrder').value = t.order || 0;
+      $('prompts').innerHTML = STATE.variantOrder.map(v => `<div class="prompt"><h3>${STATE.variants[v]} <span class="cnt" id="cnt-${v}"></span></h3><textarea data-v="${v}" placeholder="Paste the master prompt for: ${STATE.variants[v]}">${t.prompts[v] || ''}</textarea></div>`).join('');
+      $('prompts').querySelectorAll('textarea').forEach(ta => { const up = () => $('cnt-' + ta.dataset.v).textContent = ta.value.trim() ? ta.value.length + ' chars' : 'empty — not offered'; ta.oninput = up; up(); });
+      document.querySelectorAll('.theme').forEach(d => d.classList.toggle('on', d.dataset.s === slug)); }
+    $('teThumbPrev').src = t.hasThumb ? `/api/themes/${slug}/thumb?v=${Date.now()}` : ''; $('teThumbPrev').style.display = t.hasThumb ? '' : 'none';
+  }
+  $('addTheme').onclick = async () => { const name = $('newName').value.trim(); if (!name) return; const t = await api('/api/admin/themes', { method: 'POST', json: { name } }); $('newName').value = ''; editing = t.slug; await refresh(); openTheme(t.slug); };
+  $('teSave').onclick = async () => { const prompts = {}; $('prompts').querySelectorAll('textarea').forEach(ta => prompts[ta.dataset.v] = ta.value); await api('/api/admin/themes/' + editing, { method: 'PUT', json: { name: $('teNameIn').value.trim() || 'Theme', enabled: $('teEnabled').checked, order: +$('teOrder').value || 0, prompts } }); $('teMsg').textContent = 'Saved ✓'; setTimeout(() => $('teMsg').textContent = '', 2000); await refresh(); };
+  $('teDelete').onclick = async () => { if (!confirm('Delete this theme and all its prompts?')) return; await api('/api/admin/themes/' + editing, { method: 'DELETE' }); editing = null; $('themeEdit').style.display = 'none'; refresh(); };
+  $('teThumb').onchange = async () => { const f = $('teThumb').files[0]; if (!f) return; const fd = new FormData(); fd.append('thumb', f); await api('/api/admin/themes/' + editing + '/thumb', { method: 'POST', body: fd }); $('teThumb').value = ''; refresh(); };
+  // ----- test -----
+  function renderTest() { const cur = $('tTheme').value; $('tTheme').innerHTML = STATE.themes.map(t => `<option value="${t.slug}">${t.name}</option>`).join(''); if (cur) $('tTheme').value = cur; fillVars(); }
+  function fillVars() { const t = STATE.themes.find(x => x.slug === $('tTheme').value); const cur = $('tVar').value; $('tVar').innerHTML = STATE.variantOrder.map(v => `<option value="${v}" ${t && !t.prompts[v].trim() ? 'disabled' : ''}>${STATE.variants[v]}${t && !t.prompts[v].trim() ? ' (no prompt)' : ''}</option>`).join(''); if (cur) $('tVar').value = cur; }
+  $('tTheme').onchange = fillVars;
+  $('tRun').onclick = async () => {
+    const f = $('tPhoto').files[0]; if (!f) return alert('Choose a photo first');
+    $('tRun').disabled = true; $('tMsg').textContent = 'Generating… (20–60 s)'; $('testOut').innerHTML = ''; const t0 = Date.now();
+    try { const fd = new FormData(); fd.append('photo', f); fd.append('theme', $('tTheme').value); fd.append('variant', $('tVar').value);
+      const r = await api('/api/admin/test', { method: 'POST', body: fd });
+      $('tMsg').textContent = `Done in ${((Date.now() - t0) / 1000).toFixed(0)} s`; $('testOut').innerHTML = `<img src="${r.art}?v=${Date.now()}"><div class="row"><a href="${r.art}" download="test-line-art.png"><button>Download PNG</button></a><button class="primary" id="tQueue">Send this one to the robot queue</button></div>`;
+      $('tQueue').onclick = async () => { await api('/api/admin/jobs/' + r.id, { method: 'POST', json: { action: 'requeue' } }); $('tQueue').textContent = 'Queued ✓'; $('tQueue').disabled = true; };
+    } catch (e) { $('tMsg').textContent = ''; $('testOut').innerHTML = `<p class="bad">${e.message}</p>`; }
+    $('tRun').disabled = false;
+  };
+  // ----- settings -----
+  function renderSettings() { const s = STATE.settings; $('keyState').innerHTML = STATE.hasKey ? '<span class="ok">✓ set</span>' : '<span class="bad">✗ missing</span>'; $('sModel').value = s.model; $('sQuality').value = s.quality; $('sSize').value = s.size; $('sFid').value = s.inputFidelity || ''; $('sConc').value = s.concurrency; $('sEvent').value = s.eventName || ''; }
+  $('sSave').onclick = async () => { await api('/api/admin/settings', { method: 'POST', json: { model: $('sModel').value, quality: $('sQuality').value, size: $('sSize').value, inputFidelity: $('sFid').value, concurrency: +$('sConc').value || 1, eventName: $('sEvent').value } }); $('sMsg').textContent = 'Saved ✓'; setTimeout(() => $('sMsg').textContent = '', 2000); };
+  if (TOKEN) refresh(); else showLogin();
+  setInterval(() => { if (TOKEN && $('tab-queue').classList.contains('on')) refresh(); }, 5000);
+})();
+</script>
+</body>
+</html>
