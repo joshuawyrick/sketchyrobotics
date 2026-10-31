@@ -1269,7 +1269,7 @@ window.DEXARM_PEN_OFFSET=114;
     sel.addEventListener('change', () => { const v = presetVals(g, sel.value); if (v) applyGroup(g, v); box.querySelector('.pDel').disabled = !sel.value.startsWith('saved:'); box.querySelector('.pUpd').disabled = !sel.value.startsWith('saved:'); log(`${g === 'speed' ? 'speed' : 'conversion'} preset applied: ${sel.options[sel.selectedIndex].textContent}`); });
     box.querySelector('.pSave').addEventListener('click', () => {
       const name = (prompt('Name for this ' + (g === 'speed' ? 'speed' : 'conversion') + ' preset:') || '').trim(); if (!name) return;
-      const all = loadPresets(); all[g] = all[g] || { saved: {}, def: null }; all[g].saved[name] = readGroup(g); savePresets(all); fillPresetUI(g); sel.value = 'saved:' + name; box.querySelector('.pDel').disabled = false; log(`saved preset "${name}"`);
+      const all = loadPresets(); all[g] = all[g] || { saved: {}, def: null }; all[g].saved[name] = readGroup(g); savePresets(all); fillPresetUI(g); sel.value = 'saved:' + name; box.querySelector('.pDel').disabled = false; box.querySelector('.pUpd').disabled = false; log(`saved preset "${name}"`);
     });
     box.querySelector('.pUpd').addEventListener('click', () => {
       if (!sel.value.startsWith('saved:')) { log('pick one of your saved presets first (built-ins can\'t be changed — use Save as…)', 'err'); return; }
