@@ -129,7 +129,7 @@
     for (const t of r.themes) {
       const d = document.createElement('div'); d.className = 'tile';
       d.innerHTML = (t.hasThumb ? `<img src="/api/themes/${t.slug}/thumb?v=${Date.now()}" alt="">` : `<div class="ph">✎</div>`) + `<div class="nm">${t.name}</div>`;
-      d.onclick = () => { S.theme = t; S.who = null; S.g = {}; $('crumb1').textContent = t.name; renderWho(); show('s-who'); if (!streamAlive()) openCam().catch(() => {}); };
+      d.onclick = () => { S.theme = t; S.who = null; S.g = {}; $('crumb1').textContent = t.name; renderWho(); show('s-who'); };
       box.appendChild(d);
     }
   }
@@ -172,8 +172,10 @@
     if (S.stream) { $('video').srcObject = S.stream; $('camTip').textContent = 'Get your face in the oval, then tap the button'; }
     else { $('shutter').style.display = 'none'; $('guide').style.display = 'none'; $('camTip').textContent = 'Camera not available — use "Use a photo instead"'; }
   }
-  // Camera stays open for the whole session so Safari asks for permission once, not once per guest.
-  function closeCam() { /* keep the stream; just hide the video element */ }
+  // The camera stays on while a guest is posing/reviewing, and is released on the status screen so the
+  // green camera light goes off and the battery isn't drained between guests. iPadOS remembers the
+  // permission answer for a site (and for a home-screen app), so the next guest's tap re-opens it with no prompt.
+  function closeCam() { if (S.stream) { S.stream.getTracks().forEach(t => t.stop()); S.stream = null; $('video').srcObject = null; } }
   window.addEventListener('pagehide', () => { if (S.stream) S.stream.getTracks().forEach(t => t.stop()); });
   // if the OS suspends the track (iPad sleep), reopen it next time the camera screen shows
   function streamAlive() { return S.stream && S.stream.getTracks().some(t => t.readyState === 'live'); }
