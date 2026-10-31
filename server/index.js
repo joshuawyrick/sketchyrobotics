@@ -33,8 +33,9 @@ async function restoreFromBucket() {
   if (!r.ok) { console.log('storage: bucket unreachable, local disk only:', r.error && r.error.message, BUCKET_ID ? '' : '— set Secret OBJECT_STORAGE_BUCKET to your App Storage bucket name (e.g. repl-default-bucket-...)'); bucket = null; return; }
   let n = 0;
   for (const o of r.value) {
+    if (!o.name || o.name.endsWith('/') || !/^(themes|jobs)\/|^settings\.json$/.test(o.name)) continue; // skip folders and anything that isn't ours
     const dest = path.join(DATA, o.name); if (fs.existsSync(dest)) continue;
-    const d = await bucket.downloadAsBytes(o.name); if (!d.ok) continue;
+    let d; try { d = await bucket.downloadAsBytes(o.name); } catch (e) { continue; } if (!d.ok) continue;
     const buf = Array.isArray(d.value) ? Buffer.concat(d.value.map(x => Buffer.isBuffer(x) ? x : Buffer.from(x))) : Buffer.from(d.value); // real SDK returns [Buffer]
     fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.writeFileSync(dest, buf); n++;
   }
