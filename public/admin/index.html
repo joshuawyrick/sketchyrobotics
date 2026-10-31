@@ -29,6 +29,9 @@
   .note{color:var(--mut);font-size:12.5px}
   .ok{color:var(--ok)}.bad{color:var(--bad)}
   #testOut img{max-width:100%;border:1px solid var(--line);border-radius:8px;background:#fff}
+  #toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);background:#0a0a0a;color:#fff;padding:12px 20px;border-radius:10px;font:600 14px system-ui;box-shadow:0 8px 30px rgba(0,0,0,.3);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:50;max-width:90vw}
+  #toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+  #toast.ok{background:var(--ok)}#toast.bad{background:var(--bad)}
 </style>
 </head>
 <body>
@@ -91,9 +94,11 @@
     </div>
   </section>
 </main>
+<div id="toast"></div>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
+  let toastT = null; function toast(msg, kind) { const t = $('toast'); t.textContent = msg; t.className = 'on ' + (kind || 'ok'); clearTimeout(toastT); toastT = setTimeout(() => t.className = '', kind === 'bad' ? 6000 : 3500); }
   let TOKEN = sessionStorage.getItem('sr.token') || ''; let STATE = null; let editing = null;
   fetch('/logo.svg').then(r => r.text()).then(t => { const m = t.match(/<svg[^>]*>([\s\S]*)<\/svg>/); if (m) document.querySelector('header .logo').innerHTML = m[1]; }).catch(() => {});
   const api = async (url, opts = {}) => { opts.headers = Object.assign({ 'x-admin-token': TOKEN }, opts.headers || {}); if (opts.json) { opts.body = JSON.stringify(opts.json); opts.headers['Content-Type'] = 'application/json'; } const r = await fetch(url, opts); const j = await r.json().catch(() => ({})); if (r.status === 401) { showLogin(); throw new Error('login'); } if (!r.ok) throw new Error(j.error || r.status); return j; };
@@ -127,7 +132,7 @@
         ${['pending', 'ready', 'processing', 'drawing'].includes(j.status) ? `<button data-a="skip" data-id="${j.id}">Skip</button>` : ''}
         <button data-a="delete" data-id="${j.id}" class="danger">✕</button>
       </td></tr>`).join('');
-    $('qbody').querySelectorAll('button[data-a]').forEach(b => b.onclick = async () => { if (b.dataset.a === 'delete' && !confirm('Delete this entry?')) return; await api('/api/admin/jobs/' + b.dataset.id, { method: 'POST', json: { action: b.dataset.a } }); refresh(); });
+    $('qbody').querySelectorAll('button[data-a]').forEach(b => b.onclick = async () => { if (b.dataset.a === 'delete' && !confirm('Delete this entry?')) return; await api('/api/admin/jobs/' + b.dataset.id, { method: 'POST', json: { action: b.dataset.a } }); refresh(); toast({ retry: 'Re-generating', front: 'Moved to front of the line', skip: 'Skipped', requeue: 'Back in the robot queue', delete: 'Deleted' }[b.dataset.a] || 'Done'); });
   }
   // ----- themes -----
   function renderThemes() {
@@ -144,10 +149,10 @@
       document.querySelectorAll('.theme').forEach(d => d.classList.toggle('on', d.dataset.s === slug)); }
     $('teThumbPrev').src = t.hasThumb ? `/api/themes/${slug}/thumb?v=${Date.now()}` : ''; $('teThumbPrev').style.display = t.hasThumb ? '' : 'none';
   }
-  $('addTheme').onclick = async () => { const name = $('newName').value.trim(); if (!name) return; const t = await api('/api/admin/themes', { method: 'POST', json: { name } }); $('newName').value = ''; editing = t.slug; await refresh(); openTheme(t.slug); };
-  $('teSave').onclick = async () => { const prompts = {}; $('prompts').querySelectorAll('textarea').forEach(ta => prompts[ta.dataset.v] = ta.value); await api('/api/admin/themes/' + editing, { method: 'PUT', json: { name: $('teNameIn').value.trim() || 'Theme', enabled: $('teEnabled').checked, order: +$('teOrder').value || 0, prompts } }); $('teMsg').textContent = 'Saved ✓'; setTimeout(() => $('teMsg').textContent = '', 2000); await refresh(); };
-  $('teDelete').onclick = async () => { if (!confirm('Delete this theme and all its prompts?')) return; await api('/api/admin/themes/' + editing, { method: 'DELETE' }); editing = null; $('themeEdit').style.display = 'none'; refresh(); };
-  $('teThumb').onchange = async () => { const f = $('teThumb').files[0]; if (!f) return; const fd = new FormData(); fd.append('thumb', f); await api('/api/admin/themes/' + editing + '/thumb', { method: 'POST', body: fd }); $('teThumb').value = ''; refresh(); };
+  $('addTheme').onclick = async () => { const name = $('newName').value.trim(); if (!name) return; const t = await api('/api/admin/themes', { method: 'POST', json: { name } }); $('newName').value = ''; editing = t.slug; await refresh(); openTheme(t.slug); toast('Theme "' + name + '" created — add prompts and a thumbnail, then Save'); };
+  $('teSave').onclick = async () => { try { const prompts = {}; $('prompts').querySelectorAll('textarea').forEach(ta => prompts[ta.dataset.v] = ta.value); await api('/api/admin/themes/' + editing, { method: 'PUT', json: { name: $('teNameIn').value.trim() || 'Theme', enabled: $('teEnabled').checked, order: +$('teOrder').value || 0, prompts } }); $('teMsg').textContent = 'Saved ✓'; toast('Theme "' + ($('teNameIn').value.trim() || 'Theme') + '" saved — prompts are live on the iPad'); setTimeout(() => $('teMsg').textContent = '', 4000); await refresh(); } catch (e) { toast('Save failed: ' + e.message, 'bad'); } };
+  $('teDelete').onclick = async () => { if (!confirm('Delete this theme and all its prompts?')) return; await api('/api/admin/themes/' + editing, { method: 'DELETE' }); editing = null; $('themeEdit').style.display = 'none'; refresh(); toast('Theme deleted'); };
+  $('teThumb').onchange = async () => { const f = $('teThumb').files[0]; if (!f) return; const fd = new FormData(); fd.append('thumb', f); try { await api('/api/admin/themes/' + editing + '/thumb', { method: 'POST', body: fd }); toast('Thumbnail updated'); } catch (e) { toast('Thumbnail upload failed: ' + e.message, 'bad'); } $('teThumb').value = ''; refresh(); };
   // ----- test -----
   function renderTest() { const cur = $('tTheme').value; $('tTheme').innerHTML = STATE.themes.map(t => `<option value="${t.slug}">${t.name}</option>`).join(''); if (cur) $('tTheme').value = cur; fillVars(); }
   function fillVars() { const t = STATE.themes.find(x => x.slug === $('tTheme').value); const cur = $('tVar').value; $('tVar').innerHTML = STATE.variantOrder.map(v => `<option value="${v}" ${t && !t.prompts[v].trim() ? 'disabled' : ''}>${STATE.variants[v]}${t && !t.prompts[v].trim() ? ' (no prompt)' : ''}</option>`).join(''); if (cur) $('tVar').value = cur; }
@@ -165,7 +170,7 @@
   $('tModels').onclick = async () => { $('tModels').disabled = true; try { const r = await api('/api/admin/models'); const sel = $('tModel'); sel.innerHTML = '<option value="">(use Settings)</option>' + r.models.map(m => `<option value="${m}">${m}</option>`).join(''); $('sModel').innerHTML = r.models.map(m => `<option value="${m}">${m}</option>`).join(''); $('sModel').value = STATE.settings.model; $('tMsg').textContent = r.models.length + ' image models available'; } catch (e) { $('tMsg').textContent = e.message; } $('tModels').disabled = false; };
   // ----- settings -----
   function renderSettings() { const s = STATE.settings; $('durState').innerHTML = STATE.durable ? '<span class="ok">✓ bucket connected</span>' : '<span class="bad">✗ local disk only</span>'; $('keyState').innerHTML = STATE.hasKey ? '<span class="ok">✓ set</span>' : '<span class="bad">✗ missing</span>'; $('sModel').value = s.model; $('sQuality').value = s.quality; $('sSize').value = s.size; $('sFid').value = s.inputFidelity || ''; $('sConc').value = s.concurrency; $('sEvent').value = s.eventName || ''; $('sZoom').value = s.cameraZoom || 1.6; }
-  $('sSave').onclick = async () => { await api('/api/admin/settings', { method: 'POST', json: { model: $('sModel').value, quality: $('sQuality').value, size: $('sSize').value, inputFidelity: $('sFid').value, concurrency: +$('sConc').value || 1, eventName: $('sEvent').value, cameraZoom: Math.min(3, Math.max(1, +$('sZoom').value || 1.6)) } }); $('sMsg').textContent = 'Saved ✓'; setTimeout(() => $('sMsg').textContent = '', 2000); };
+  $('sSave').onclick = async () => { await api('/api/admin/settings', { method: 'POST', json: { model: $('sModel').value, quality: $('sQuality').value, size: $('sSize').value, inputFidelity: $('sFid').value, concurrency: +$('sConc').value || 1, eventName: $('sEvent').value, cameraZoom: Math.min(3, Math.max(1, +$('sZoom').value || 1.6)) } }); $('sMsg').textContent = 'Saved ✓'; toast('Settings saved'); setTimeout(() => $('sMsg').textContent = '', 4000); };
   if (TOKEN) refresh(); else showLogin();
   setInterval(() => { if (TOKEN && $('tab-queue').classList.contains('on')) refresh(); }, 5000);
 })();
