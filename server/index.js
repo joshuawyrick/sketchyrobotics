@@ -35,7 +35,8 @@ async function restoreFromBucket() {
   for (const o of r.value) {
     const dest = path.join(DATA, o.name); if (fs.existsSync(dest)) continue;
     const d = await bucket.downloadAsBytes(o.name); if (!d.ok) continue;
-    fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.writeFileSync(dest, d.value); n++;
+    const buf = Array.isArray(d.value) ? Buffer.concat(d.value.map(x => Buffer.isBuffer(x) ? x : Buffer.from(x))) : Buffer.from(d.value); // real SDK returns [Buffer]
+    fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.writeFileSync(dest, buf); n++;
   }
   console.log(`storage: Replit bucket connected (${BUCKET_ID || 'default'}), restored ${n} file(s)`);
 }
