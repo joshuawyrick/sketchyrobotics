@@ -47,7 +47,7 @@
   #s-cam .crumb{flex:0 0 auto}#s-cam .bar{flex:0 0 auto;padding-top:12px}
   .cam video,.cam img,.cam canvas{max-width:100%;max-height:100%;object-fit:contain}
   .cam img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
-  .cam video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+  .cam video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1) scale(var(--zoom,1.6));transform-origin:center}
   .count{position:absolute;top:18px;left:50%;transform:translateX(-50%);min-width:92px;padding:6px 20px;border-radius:999px;background:rgba(0,0,0,.55);color:#fff;font:800 56px/1.1 system-ui;text-align:center;display:none;letter-spacing:1px}
   .count.on{display:block}
   .count.go{background:rgba(0,109,246,.85);font-size:34px;padding:14px 26px}
@@ -123,7 +123,7 @@
 
   async function loadThemes() {
     const r = await fetch('/api/themes').then(r => r.json());
-    S.themes = r.themes; $('evName').textContent = r.event || '';
+    S.themes = r.themes; $('evName').textContent = r.event || ''; S.zoom = +r.cameraZoom || 1.6; document.documentElement.style.setProperty('--zoom', S.zoom);
     const box = $('tiles'); box.innerHTML = '';
     if (!r.themes.length) box.innerHTML = '<p class="sub">No styles are set up yet. Add one in Admin.</p>';
     for (const t of r.themes) {
@@ -184,7 +184,7 @@
   function capture() {
     const v = $('video'); const c = document.createElement('canvas');
     // crop the captured frame to what the guest saw on screen (object-fit: cover)
-    const box = $('cam').getBoundingClientRect(); const vw = v.videoWidth, vh = v.videoHeight; const scale = Math.max(box.width / vw, box.height / vh);
+    const box = $('cam').getBoundingClientRect(); const vw = v.videoWidth, vh = v.videoHeight; const zoom = S.zoom || 1; const scale = Math.max(box.width / vw, box.height / vh) * zoom;
     const cw = Math.round(box.width / scale), ch = Math.round(box.height / scale); const sx = Math.round((vw - cw) / 2), sy = Math.round((vh - ch) / 2);
     c.width = cw; c.height = ch; const g2 = c.getContext('2d');
     g2.translate(cw, 0); g2.scale(-1, 1); g2.drawImage(v, sx, sy, cw, ch, 0, 0, cw, ch); // un-mirror so left/right match the guest's choice

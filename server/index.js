@@ -49,7 +49,7 @@ const OPENAI_BASE = process.env.OPENAI_BASE || 'https://api.openai.com';
 
 // ---------- settings ----------
 const SETTINGS_FILE = path.join(DATA, 'settings.json');
-const DEFAULT_SETTINGS = { model: 'chatgpt-image-latest', quality: 'medium', size: '1024x1536', inputFidelity: '', concurrency: 2, autoRun: true, pauseBetween: true, eventName: 'Sketchy Robotics' };
+const DEFAULT_SETTINGS = { model: 'chatgpt-image-latest', quality: 'medium', size: '1024x1536', inputFidelity: '', concurrency: 2, autoRun: true, pauseBetween: true, eventName: 'Sketchy Robotics', cameraZoom: 1.6 };
 function getSettings() { try { return Object.assign({}, DEFAULT_SETTINGS, JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))); } catch (_) { return Object.assign({}, DEFAULT_SETTINGS); } }
 function saveSettings(s) { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2)); persist(SETTINGS_FILE); }
 
@@ -141,7 +141,7 @@ app.use('/admin', express.static(path.join(ROOT, 'public', 'admin')));
 app.use('/', express.static(path.join(ROOT, 'public', 'guest')));
 
 // ----- public (guest) -----
-app.get('/api/themes', (req, res) => res.json({ themes: listThemes().filter(t => t.enabled).map(t => ({ slug: t.slug, name: t.name, hasThumb: t.hasThumb, variants: VARIANTS.filter(v => t.prompts[v].trim()) })), variants: VARIANT_LABELS, event: getSettings().eventName }));
+app.get('/api/themes', (req, res) => res.json({ themes: listThemes().filter(t => t.enabled).map(t => ({ slug: t.slug, name: t.name, hasThumb: t.hasThumb, variants: VARIANTS.filter(v => t.prompts[v].trim()) })), variants: VARIANT_LABELS, event: getSettings().eventName, cameraZoom: getSettings().cameraZoom }));
 app.get('/api/themes/:slug/thumb', (req, res) => { const f = path.join(THEMES, slugify(req.params.slug), 'thumb.png'); if (fs.existsSync(f)) res.sendFile(f); else res.status(404).end(); });
 app.post('/api/jobs', upload.single('photo'), async (req, res) => {
   try {

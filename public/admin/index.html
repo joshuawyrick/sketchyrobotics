@@ -85,6 +85,7 @@
     </div>
     <div class="card"><h2>Event</h2>
       <div class="row"><label>Event name (shown on iPad)</label><input type="text" id="sEvent" style="max-width:300px"></div>
+      <div class="row"><label>iPad camera zoom</label><input type="number" id="sZoom" min="1" max="3" step="0.1" style="max-width:100px"><span class="note">1.0 = full wide lens; 1.6 fills the oval with a face at arm's length; raise it if faces look small on your stand.</span></div>
       <div class="row"><label>Admin password</label><span class="note">Set as the Secret <code>ADMIN_PASSWORD</code> in Replit (default "sketchy").</span></div>
       <div class="row"><button class="primary" id="sSave">Save settings</button><span id="sMsg" class="ok"></span></div>
     </div>
@@ -163,8 +164,8 @@
   };
   $('tModels').onclick = async () => { $('tModels').disabled = true; try { const r = await api('/api/admin/models'); const sel = $('tModel'); sel.innerHTML = '<option value="">(use Settings)</option>' + r.models.map(m => `<option value="${m}">${m}</option>`).join(''); $('sModel').innerHTML = r.models.map(m => `<option value="${m}">${m}</option>`).join(''); $('sModel').value = STATE.settings.model; $('tMsg').textContent = r.models.length + ' image models available'; } catch (e) { $('tMsg').textContent = e.message; } $('tModels').disabled = false; };
   // ----- settings -----
-  function renderSettings() { const s = STATE.settings; $('durState').innerHTML = STATE.durable ? '<span class="ok">✓ bucket connected</span>' : '<span class="bad">✗ local disk only</span>'; $('keyState').innerHTML = STATE.hasKey ? '<span class="ok">✓ set</span>' : '<span class="bad">✗ missing</span>'; $('sModel').value = s.model; $('sQuality').value = s.quality; $('sSize').value = s.size; $('sFid').value = s.inputFidelity || ''; $('sConc').value = s.concurrency; $('sEvent').value = s.eventName || ''; }
-  $('sSave').onclick = async () => { await api('/api/admin/settings', { method: 'POST', json: { model: $('sModel').value, quality: $('sQuality').value, size: $('sSize').value, inputFidelity: $('sFid').value, concurrency: +$('sConc').value || 1, eventName: $('sEvent').value } }); $('sMsg').textContent = 'Saved ✓'; setTimeout(() => $('sMsg').textContent = '', 2000); };
+  function renderSettings() { const s = STATE.settings; $('durState').innerHTML = STATE.durable ? '<span class="ok">✓ bucket connected</span>' : '<span class="bad">✗ local disk only</span>'; $('keyState').innerHTML = STATE.hasKey ? '<span class="ok">✓ set</span>' : '<span class="bad">✗ missing</span>'; $('sModel').value = s.model; $('sQuality').value = s.quality; $('sSize').value = s.size; $('sFid').value = s.inputFidelity || ''; $('sConc').value = s.concurrency; $('sEvent').value = s.eventName || ''; $('sZoom').value = s.cameraZoom || 1.6; }
+  $('sSave').onclick = async () => { await api('/api/admin/settings', { method: 'POST', json: { model: $('sModel').value, quality: $('sQuality').value, size: $('sSize').value, inputFidelity: $('sFid').value, concurrency: +$('sConc').value || 1, eventName: $('sEvent').value, cameraZoom: Math.min(3, Math.max(1, +$('sZoom').value || 1.6)) } }); $('sMsg').textContent = 'Saved ✓'; setTimeout(() => $('sMsg').textContent = '', 2000); };
   if (TOKEN) refresh(); else showLogin();
   setInterval(() => { if (TOKEN && $('tab-queue').classList.contains('on')) refresh(); }, 5000);
 })();
