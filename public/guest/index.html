@@ -99,7 +99,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const screens = ['s-theme', 's-who', 's-cam', 's-status'];
-  const show = id => { for (const s of screens) $(s).classList.toggle('on', s === id); };
+  const show = id => { for (const s of screens) $(s).classList.toggle('on', s === id); setTimeout(() => { if (typeof bump === 'function') bump(); }, 0); };
   const S = { themes: [], theme: null, who: null, g: {}, blob: null, job: null, stream: null };
   const LABEL = { male: 'Male', female: 'Female' };
 
@@ -159,12 +159,13 @@
   function showShot(url) { $('shot').src = url; $('shot').style.display = ''; $('video').style.display = 'none'; $('guide').style.display = 'none'; $('shutter').style.display = 'none'; $('camBar').style.display = 'none'; $('shotBar').style.display = ''; }
   $('retake').onclick = openCam;
   $('backCam').onclick = () => { closeCam(); show('s-who'); };
+  const _origShow = show; // keep idle timer in sync with screen changes
   $('send').onclick = async () => {
     $('send').disabled = true; $('send').textContent = 'Sending…';
     const fd = new FormData(); fd.append('photo', S.blob, 'photo.jpg'); fd.append('theme', S.theme.slug); fd.append('variant', variantKey());
     try {
       const r = await fetch('/api/jobs', { method: 'POST', body: fd }); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status);
-      S.job = j; closeCam(); show('s-status'); poll();
+      S.job = j; S.cdTimer = null; S.cdText = ''; closeCam(); show('s-status'); poll();
     } catch (e) { alert('Could not send: ' + e.message); }
     $('send').disabled = false; $('send').textContent = 'Looks good — send it';
   };
@@ -172,12 +173,23 @@
     const st = $('status'); const j = S.job;
     const r = await fetch('/api/jobs/' + j.id).then(r => r.json()).catch(() => null); if (!r) return setTimeout(poll, 3000);
     S.job = r;
-    if (r.status === 'pending' || r.status === 'processing') { st.innerHTML = `<div class="spin"></div><h1>Drawing your sketch…</h1><p class="sub">You're <b>#${r.position || '?'}</b> in line. This takes about 30 seconds.</p>`; return setTimeout(poll, 2500); }
-    if (r.status === 'failed') { st.innerHTML = `<div class="err">Sorry — that one didn't work. Please try again.<br><small>${r.error || ''}</small></div>`; return; }
-    st.innerHTML = `<img class="art" src="/api/jobs/${r.id}/art?v=${Date.now()}"><h1>You're #${r.number}</h1><p class="sub">${r.status === 'done' ? 'Drawn! Pick it up at the robot.' : r.status === 'drawing' ? 'The robot is drawing you right now!' : 'Watch the robot — your sketch is <b>#' + (r.position || '?') + '</b> in line.'}</p>`;
-    if (r.status !== 'done') setTimeout(poll, 4000);
+    if (r.status === 'pending' || r.status === 'processing') { st.innerHTML = `<div class="spin"></div><h1>Drawing your sketch…</h1><p class="sub">You're <b>#${r.position || '?'}</b> in line. This takes about a minute.</p>`; S.pollTimer = setTimeout(poll, 2500); return; }
+    if (r.status === 'failed') { st.innerHTML = `<div class="err">Sorry — that one didn't work. Please try again.<br><small>${r.error || ''}</small></div><p class="sub" id="cd"></p>`; startCountdown(15); return; }
+    st.innerHTML = `<img class="art" src="/api/jobs/${r.id}/art?v=${Date.now()}"><h1>You're #${r.number}</h1><p class="sub">${r.status === 'done' ? 'Drawn! Pick it up at the robot.' : r.status === 'drawing' ? 'The robot is drawing you right now!' : 'Watch the robot — your sketch is <b>#' + (r.position || '?') + '</b> in line.'}</p><p class="sub" id="cd"></p>`;
+    if (!S.cdTimer) startCountdown(RESET_AFTER_ART); else { const el = $('cd'); if (el) el.textContent = S.cdText || ''; }
+    if (r.status !== 'done') S.pollTimer = setTimeout(poll, 4000);
   }
-  $('again').onclick = () => { S.theme = null; S.job = null; loadThemes(); show('s-theme'); };
+  const RESET_AFTER_ART = 20, IDLE_RESET = 90; // seconds
+  function goHome() { clearTimeout(S.pollTimer); clearInterval(S.cdTimer); S.cdTimer = null; S.cdText = ''; closeCam(); S.theme = null; S.job = null; S.who = null; S.g = {}; loadThemes(); show('s-theme'); }
+  function startCountdown(secs) {
+    clearInterval(S.cdTimer); let left = secs; const tick = () => { S.cdText = `Next person in ${left} s — tap to stay`; const el = $('cd'); if (el) el.textContent = S.cdText; if (left-- <= 0) goHome(); };
+    tick(); S.cdTimer = setInterval(tick, 1000);
+    const stay = () => { clearInterval(S.cdTimer); S.cdTimer = 'stay'; S.cdText = 'Tap "Next person" when you\'re done.'; const el = $('cd'); if (el) el.textContent = S.cdText; }; $('status').onclick = stay;
+  }
+  // idle reset on the middle screens (someone tapped a style then wandered off)
+  let idle = null; const bump = () => { clearTimeout(idle); if (!$('s-theme').classList.contains('on') && !$('s-status').classList.contains('on')) idle = setTimeout(goHome, IDLE_RESET * 1000); };
+  for (const ev of ['touchstart', 'mousedown', 'keydown']) window.addEventListener(ev, bump, { passive: true });
+  $('again').onclick = goHome;
   loadThemes(); setInterval(() => { if ($('s-theme').classList.contains('on')) loadThemes(); }, 30000);
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
