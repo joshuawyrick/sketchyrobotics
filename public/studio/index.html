@@ -953,9 +953,12 @@ window.DEXARM_PEN_OFFSET=114;
     }
     static supported() { return typeof navigator !== 'undefined' && !!navigator.serial; }
 
-    async connect(baud = 115200) {
+    /** ports the user already approved in this browser (Chrome remembers them across reloads) */
+    static async granted() { try { return await navigator.serial.getPorts(); } catch (_) { return []; } }
+
+    async connect(baud = 115200, port = null) {
       // DexArm is an STM32 CDC device: VID 0x0483 PID 0x5740 (filter is a hint; user still picks)
-      this.port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x0483 }] }).catch(() => navigator.serial.requestPort());
+      this.port = port || await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x0483 }] }).catch(() => navigator.serial.requestPort());
       await this.port.open({ baudRate: baud, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', bufferSize: 65536 });
       this.writer = this.port.writable.getWriter();
       this.connected = true; this._alive = true; this.onStatus('connected');
@@ -1321,13 +1324,27 @@ window.DEXARM_PEN_OFFSET=114;
 
   // ---------- machine ----------
   function guard(fn) { return async () => { if (!link.connected) { log('connect the arm first', 'err'); return; } if (S.running) { log('busy drawing', 'err'); return; } try { await fn(); } catch (e) { log(e.message, 'err'); } }; }
-  $('btnConnect').addEventListener('click', async () => {
-    try { await link.connect(); } catch (e) { log('connect failed: ' + e.message, 'err'); return; }
+  async function connectArm(port) { // port = a previously approved port (auto-reconnect) or null to show the picker
+    try { await link.connect(115200, port); } catch (e) { if (!port) log('connect failed: ' + e.message, 'err'); return false; }
+    try { const i = link.port.getInfo ? link.port.getInfo() : {}; localStorage.setItem('dexdraw.lastPort', JSON.stringify({ v: i.usbVendorId, p: i.usbProductId })); localStorage.setItem('dexdraw.autoConnect', '1'); } catch (_) { }
     try { const v = await link.query('M2010', /V?\d+\.\d+/i, 2500); $('fw').textContent = 'fw ' + (v.match(/V?\d+(\.\d+)+/i) || [v])[0]; } catch (_) { $('fw').textContent = 'connected'; }
     await link.send('M888 P0').catch(() => { });
     await link.send('M400').catch(() => { }); await link.send('M114').catch(() => { });
-  });
-  $('btnDisconnect').addEventListener('click', () => link.disconnect());
+    return true;
+  }
+  // Reconnect without the picker after a page reload (Chrome keeps the USB approval); the arm keeps its position, so no re-homing needed.
+  async function autoReconnect(why) {
+    if (!DexSerial.supported() || link.connected || localStorage.getItem('dexdraw.autoConnect') !== '1') return;
+    const ports = await DexSerial.granted(); if (!ports.length) return;
+    let last = {}; try { last = JSON.parse(localStorage.getItem('dexdraw.lastPort') || '{}'); } catch (_) { }
+    const match = ports.find(p => { const i = p.getInfo ? p.getInfo() : {}; return i.usbVendorId === last.v && i.usbProductId === last.p; }) || (ports.length === 1 ? ports[0] : null);
+    if (!match) return;
+    log('reconnecting to the arm' + (why ? ' (' + why + ')' : '') + '…');
+    if (!(await connectArm(match))) log('auto-reconnect failed — unplug/replug the USB or press Connect', 'err');
+  }
+  $('btnConnect').addEventListener('click', () => connectArm(null));
+  $('btnDisconnect').addEventListener('click', () => { localStorage.setItem('dexdraw.autoConnect', '0'); link.disconnect(); });
+  if (DexSerial.supported()) { autoReconnect('page reloaded'); navigator.serial.addEventListener('connect', () => setTimeout(() => autoReconnect('USB plugged in'), 500)); }
   $('btnHome').addEventListener('click', guard(async () => { log('homing…'); await link.send('M1112'); await link.send('M400'); await link.send('M114'); }));
   $('btnPos').addEventListener('click', guard(() => link.send('M114')));
   $('btnMotorsOff').addEventListener('click', guard(() => link.send('M84')));
