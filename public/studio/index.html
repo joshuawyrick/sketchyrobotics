@@ -207,6 +207,9 @@
         <div class="note" id="qStatus">Guests' sketches appear here when ready.</div>
         <div class="row"><label>Pause after each drawing (to change paper)</label><input id="qPause" type="checkbox" checked></div>
         <div class="row"><label>Show preview before drawing</label><input id="qPreview" type="checkbox" checked><input id="qPreviewSecs" type="number" value="6" min="0" step="1" style="width:56px"><span class="unit">s</span></div>
+        <div class="row"><label>Drawing size for this event</label><select id="qSize"><option value="fit">Fit to page</option><option value="4">4 in wide</option><option value="5">5 in wide</option><option value="6" selected>6 in wide</option><option value="7">7 in wide</option><option value="8">8 in wide</option><option value="custom">Custom…</option></select></div>
+        <div class="row" id="qSizeCustomRow" style="display:none"><label>Custom width</label><input id="qSizeCustom" type="number" value="5.5" step="0.25" min="1"><span class="unit">in</span></div>
+        <div class="row"><label>Place on page</label><select id="qPlace"><option value="center" selected>Centered</option><option value="top">Top (leave room below)</option><option value="bottom">Bottom (leave room above)</option></select></div>
         <div id="qList" class="qList"></div>
       </div>
     </section>
@@ -1032,7 +1035,7 @@ window.DEXARM_PEN_OFFSET=114;
 
   // ---------- persistence ----------
   const PERSIST = ['imgMode', 'imgThr', 'imgInv', 'imgRes', 'imgSpeck', 'imgPrune', 'imgSmooth', 'imgBlur', 'paper', 'orient', 'margin', 'paperX', 'paperY',
-    'optOrder', 'optJoin', 'optSimp', 'optMin', 'optMinDetail', 'optSimpDetail', 'spDraw', 'spTravel', 'spZ', 'acc', 'accT', 'jerk', 'fastTravel', 'inflight', 'zDown', 'zLift', 'zSafe', 'jogStep', 'jogSpeed', 'qPause', 'qPreview', 'qPreviewSecs'];
+    'optOrder', 'optJoin', 'optSimp', 'optMin', 'optMinDetail', 'optSimpDetail', 'spDraw', 'spTravel', 'spZ', 'acc', 'accT', 'jerk', 'fastTravel', 'inflight', 'zDown', 'zLift', 'zSafe', 'jogStep', 'jogSpeed', 'qPause', 'qPreview', 'qPreviewSecs', 'qSize', 'qSizeCustom', 'qPlace'];
   function saveSettings() { try { const o = {}; for (const id of PERSIST) { const e = $(id); o[id] = e.type === 'checkbox' ? e.checked : e.value; } localStorage.setItem('dexdraw.settings.v7', JSON.stringify(o)); } catch (_) { } }
   function loadSettings() { try { const o = JSON.parse(localStorage.getItem('dexdraw.settings.v7') || '{}'); for (const id of PERSIST) if (id in o) { const e = $(id); if (e.type === 'checkbox') e.checked = !!o[id]; else e.value = o[id]; } } catch (_) { } }
   loadSettings();
@@ -1487,6 +1490,7 @@ window.DEXARM_PEN_OFFSET=114;
       await loadFromUrl(`/api/jobs/${job.id}/art`, `queue-${job.number}.png`);
       // wait for the trace worker + planner to settle
       await new Promise(r => setTimeout(r, 400)); for (let i = 0; i < 100 && (S.planDirty || !S.plan); i++) await new Promise(r => setTimeout(r, 200));
+      applyEventSize(); for (let i = 0; i < 50 && S.planDirty; i++) await new Promise(r => setTimeout(r, 100));
       if (S.block) throw new Error(S.block);
       if ($('qPreview').checked) { $('qStatus').textContent = `#${job.number}: check the preview — drawing in ${num('qPreviewSecs')} s (press Skip to cancel)`; Q.cancelPreview = false; for (let i = 0; i < num('qPreviewSecs') * 10; i++) { if (Q.cancelPreview) throw new Error('skipped by operator'); await new Promise(r => setTimeout(r, 100)); } }
       generate(); if (!S.gcode) throw new Error(S.block || 'no g-code');
@@ -1502,6 +1506,17 @@ window.DEXARM_PEN_OFFSET=114;
     }
     Q.busy = false; Q.current = null; qRefresh();
   }
+  function eventWidthMm() { const v = $('qSize').value; if (v === 'fit') return null; const inches = v === 'custom' ? num('qSizeCustom') : +v; return inches > 0 ? inches * IN : null; }
+  function applyEventSize() { // size + place the (single) queued drawing per the event settings
+    const o = S.objects[0]; if (!o) return; const P = paper().safe; const w = eventWidthMm();
+    if (w) { const a = aspect(o); o.w = Math.min(w, P.w); o.h = o.w / a; if (o.h > P.h) { o.h = P.h; o.w = o.h * a; } } else fitToPage(o);
+    o.x = (P.minX + P.maxX) / 2;
+    const place = $('qPlace').value; o.y = place === 'top' ? P.maxY - o.h / 2 : place === 'bottom' ? P.minY + o.h / 2 : (P.minY + P.maxY) / 2;
+    for (let i = 0; i < 60 && !boxInReach(o); i++) { o.w *= 0.96; o.h *= 0.96; if (place === 'top') o.y = P.maxY - o.h / 2; else if (place === 'bottom') o.y = P.minY + o.h / 2; }
+    constrain(o); refresh();
+  }
+  $('qSize').addEventListener('change', () => { $('qSizeCustomRow').style.display = $('qSize').value === 'custom' ? '' : 'none'; });
+  $('qSizeCustomRow').style.display = $('qSize').value === 'custom' ? '' : 'none';
   function syncQ() { $('btnQAuto').textContent = Q.on ? '■ Stop auto-run' : '▶ Auto-run queue'; $('btnQAuto').classList.toggle('danger', Q.on); $('btnQAuto').classList.toggle('primary', !Q.on); if (!Q.on) { Q.waitingContinue = false; $('btnQContinue').style.display = 'none'; } }
   $('btnQAuto').addEventListener('click', () => { if (!link.connected) { log('connect the arm first', 'err'); return; } Q.on = !Q.on; syncQ(); if (Q.on) { log('auto-run on: setup must be done (Home, pen height, paper center)'); qRefresh(); } });
   $('btnQNext').addEventListener('click', () => { if (!link.connected) { log('connect the arm first', 'err'); return; } qDrawNext(); });
