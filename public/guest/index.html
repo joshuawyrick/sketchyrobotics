@@ -43,8 +43,17 @@
   .cam{flex:1;position:relative;background:#000;border-radius:18px;overflow:hidden;min-height:0;display:flex;align-items:center;justify-content:center}
   .cam video,.cam img,.cam canvas{max-width:100%;max-height:100%;object-fit:contain}
   .cam video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
-  .guide{position:absolute;inset:0;pointer-events:none;border:2px dashed rgba(255,255,255,.35);margin:7%;border-radius:50% 50% 45% 45%/40% 40% 60% 60%}
-  .shutter{position:absolute;bottom:22px;left:50%;transform:translateX(-50%);width:84px;height:84px;border-radius:50%;background:#fff;border:6px solid rgba(255,255,255,.5);box-shadow:0 0 0 3px #000 inset;cursor:pointer}
+  .count{position:absolute;top:18px;left:50%;transform:translateX(-50%);min-width:92px;padding:6px 20px;border-radius:999px;background:rgba(0,0,0,.55);color:#fff;font:800 56px/1.1 system-ui;text-align:center;display:none;letter-spacing:1px}
+  .count.on{display:block}
+  .count.go{background:rgba(0,109,246,.85);font-size:34px;padding:14px 26px}
+  .tip{position:absolute;top:18px;left:50%;transform:translateX(-50%);padding:8px 16px;border-radius:999px;background:rgba(0,0,0,.5);color:#fff;font:600 16px system-ui;white-space:nowrap}
+  .flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
+  .flash.on{animation:fl .35s ease-out}@keyframes fl{0%{opacity:.9}100%{opacity:0}}
+  .guide{position:absolute;left:50%;top:50%;width:46%;max-width:380px;aspect-ratio:3/4;transform:translate(-50%,-50%);pointer-events:none;border:3px dashed rgba(255,255,255,.55);border-radius:50%/48%}
+  .snap{position:absolute;bottom:26px;left:50%;transform:translateX(-50%);width:140px;height:140px;border-radius:50%;background:#fff;border:8px solid rgba(255,255,255,.45);box-shadow:0 6px 24px rgba(0,0,0,.45);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}
+  .snap span{font:800 16px/1.1 system-ui;color:var(--blue);letter-spacing:.5px}
+  .snap:active{transform:translateX(-50%) scale(.95)}
+  .snap:disabled{opacity:.5}
   .status{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:12px}
   .big{font-size:96px;font-weight:800;color:var(--blue);line-height:1}
   .art{max-height:52vh;max-width:100%;border:1px solid var(--line);border-radius:12px;background:#fff}
@@ -83,7 +92,9 @@
     <div class="cam" id="cam">
       <video id="video" autoplay playsinline muted></video>
       <div class="guide" id="guide"></div>
-      <div class="shutter" id="shutter"></div>
+      <div class="count" id="count"></div>
+      <div class="tip" id="camTip">Get your face in the oval, then tap the button</div>
+      <button class="snap" id="shutter"><span>TAKE PHOTO</span></button>
       <img id="shot" style="display:none">
     </div>
     <div class="bar" id="camBar"><button class="btn" id="backCam">Back</button><button class="btn" id="fileBtn">Use a photo instead</button><input type="file" id="fileIn" accept="image/*" capture="user" style="display:none"></div>
@@ -113,7 +124,7 @@
     for (const t of r.themes) {
       const d = document.createElement('div'); d.className = 'tile';
       d.innerHTML = (t.hasThumb ? `<img src="/api/themes/${t.slug}/thumb?v=${Date.now()}" alt="">` : `<div class="ph">✎</div>`) + `<div class="nm">${t.name}</div>`;
-      d.onclick = () => { S.theme = t; S.who = null; S.g = {}; $('crumb1').textContent = t.name; renderWho(); show('s-who'); };
+      d.onclick = () => { S.theme = t; S.who = null; S.g = {}; $('crumb1').textContent = t.name; renderWho(); show('s-who'); if (!streamAlive()) openCam().catch(() => {}); };
       box.appendChild(d);
     }
   }
@@ -142,21 +153,43 @@
   $('nextWho').onclick = () => { $('crumb2').textContent = `${S.theme.name} · ${variantLabel()}`; openCam(); show('s-cam'); };
   function variantLabel() { const k = variantKey(); return ({ '1-male': 'one male', '1-female': 'one female', '2-male-male': 'two males', '2-female-female': 'two females', '2-male-female': 'male + female', '2-female-male': 'female + male', 'pet-male': 'male + pet', 'pet-female': 'female + pet' })[k] || k; }
 
+  const COUNTDOWN = 3;
   async function openCam() {
-    $('shot').style.display = 'none'; $('video').style.display = ''; $('guide').style.display = ''; $('shutter').style.display = ''; $('camBar').style.display = ''; $('shotBar').style.display = 'none'; S.blob = null;
-    if (S.stream) return;
-    try { S.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1920 }, height: { ideal: 1440 } }, audio: false }); $('video').srcObject = S.stream; }
-    catch (e) { $('shutter').style.display = 'none'; $('guide').style.display = 'none'; }
+    $('shot').style.display = 'none'; $('video').style.display = ''; $('guide').style.display = ''; $('shutter').style.display = ''; $('shutter').disabled = false; $('camTip').style.display = ''; $('count').className = 'count'; $('camBar').style.display = ''; $('shotBar').style.display = 'none'; S.blob = null;
+    if (streamAlive()) { $('video').srcObject = S.stream; return; } S.stream = null;
+    // 4:3 at the front camera's native framing; the <video> is shown cover-cropped so the face fills the screen
+    const tries = [
+      { video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 }, aspectRatio: { ideal: 4 / 3 } }, audio: false },
+      { video: { facingMode: 'user' }, audio: false },
+      { video: true, audio: false }
+    ];
+    for (const c of tries) { try { S.stream = await navigator.mediaDevices.getUserMedia(c); break; } catch (e) { S.camErr = e; } }
+    if (S.stream) { $('video').srcObject = S.stream; $('camTip').textContent = 'Get your face in the oval, then tap the button'; }
+    else { $('shutter').style.display = 'none'; $('guide').style.display = 'none'; $('camTip').textContent = 'Camera not available — use "Use a photo instead"'; }
   }
-  function closeCam() { if (S.stream) { S.stream.getTracks().forEach(t => t.stop()); S.stream = null; $('video').srcObject = null; } }
-  $('shutter').onclick = () => {
-    const v = $('video'); const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
-    const g = c.getContext('2d'); g.translate(c.width, 0); g.scale(-1, 1); g.drawImage(v, 0, 0); // un-mirror so left/right match what the guest chose
+  // Camera stays open for the whole session so Safari asks for permission once, not once per guest.
+  function closeCam() { /* keep the stream; just hide the video element */ }
+  window.addEventListener('pagehide', () => { if (S.stream) S.stream.getTracks().forEach(t => t.stop()); });
+  // if the OS suspends the track (iPad sleep), reopen it next time the camera screen shows
+  function streamAlive() { return S.stream && S.stream.getTracks().some(t => t.readyState === 'live'); }
+  function capture() {
+    const v = $('video'); const c = document.createElement('canvas');
+    // crop the captured frame to what the guest saw on screen (object-fit: cover)
+    const box = $('cam').getBoundingClientRect(); const vw = v.videoWidth, vh = v.videoHeight; const scale = Math.max(box.width / vw, box.height / vh);
+    const cw = Math.round(box.width / scale), ch = Math.round(box.height / scale); const sx = Math.round((vw - cw) / 2), sy = Math.round((vh - ch) / 2);
+    c.width = cw; c.height = ch; const g2 = c.getContext('2d');
+    g2.translate(cw, 0); g2.scale(-1, 1); g2.drawImage(v, sx, sy, cw, ch, 0, 0, cw, ch); // un-mirror so left/right match the guest's choice
+    const fl = document.createElement('div'); fl.className = 'flash on'; $('cam').appendChild(fl); setTimeout(() => fl.remove(), 400);
     c.toBlob(b => { S.blob = b; showShot(URL.createObjectURL(b)); }, 'image/jpeg', 0.92);
+  }
+  $('shutter').onclick = () => {
+    if (S.counting) return; S.counting = true; $('shutter').disabled = true; $('camTip').style.display = 'none';
+    const el = $('count'); el.className = 'count on'; let n = COUNTDOWN; el.textContent = n;
+    const t = setInterval(() => { n--; if (n > 0) { el.textContent = n; return; } clearInterval(t); el.textContent = 'SMILE!'; el.classList.add('go'); setTimeout(() => { el.className = 'count'; S.counting = false; capture(); }, 350); }, 1000);
   };
   $('fileBtn').onclick = () => $('fileIn').click();
   $('fileIn').onchange = () => { const f = $('fileIn').files[0]; if (f) { S.blob = f; showShot(URL.createObjectURL(f)); } $('fileIn').value = ''; };
-  function showShot(url) { $('shot').src = url; $('shot').style.display = ''; $('video').style.display = 'none'; $('guide').style.display = 'none'; $('shutter').style.display = 'none'; $('camBar').style.display = 'none'; $('shotBar').style.display = ''; }
+  function showShot(url) { $('shot').src = url; $('shot').style.display = ''; $('video').style.display = 'none'; $('guide').style.display = 'none'; $('shutter').style.display = 'none'; $('camTip').style.display = 'none'; $('camBar').style.display = 'none'; $('shotBar').style.display = ''; }
   $('retake').onclick = openCam;
   $('backCam').onclick = () => { closeCam(); show('s-who'); };
   const _origShow = show; // keep idle timer in sync with screen changes
