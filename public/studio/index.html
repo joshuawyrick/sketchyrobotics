@@ -155,12 +155,12 @@
       <div class="body">
         <div class="row"><label>Reorder for shortest travel</label><input id="optOrder" type="checkbox" checked></div>
         <div class="row"><label>Join ends within</label><input id="optJoin" type="number" value="0.6" step="0.1"><span class="unit">mm</span></div>
-        <div class="row"><label>Curve point spacing</label><input id="optSeg" type="number" value="2.5" step="0.5" min="0.5"><span class="unit">mm</span></div>
-        <div class="row"><label>Max corner angle between points</label><input id="optTurn" type="number" value="5" step="1" min="1" max="30"><span class="unit">°</span></div>
-        <div class="row"><label>Simplify tolerance (outside zone)</label><input id="optSimp" type="number" value="0.1" step="0.05"><span class="unit">mm</span></div>
-        <div class="row"><label>Min line length (outside zone)</label><input id="optMin" type="number" value="2" step="0.5"><span class="unit">mm</span></div>
+        <div class="row"><label>Curve point spacing</label><input id="optSeg" type="number" value="1.5" step="0.5" min="0.5"><span class="unit">mm</span></div>
+        <div class="row"><label>Max corner angle between points</label><input id="optTurn" type="number" value="4" step="1" min="1" max="30"><span class="unit">°</span></div>
+        <div class="row"><label>Simplify tolerance (outside zone)</label><input id="optSimp" type="number" value="0.08" step="0.05"><span class="unit">mm</span></div>
+        <div class="row"><label>Min line length (outside zone)</label><input id="optMin" type="number" value="1.5" step="0.5"><span class="unit">mm</span></div>
         <div class="row"><label>Min line length (in zone)</label><input id="optMinDetail" type="number" value="1" step="0.5"><span class="unit">mm</span></div>
-        <div class="row"><label>Simplify tolerance (in zone)</label><input id="optSimpDetail" type="number" value="0.06" step="0.02"><span class="unit">mm</span></div>
+        <div class="row"><label>Simplify tolerance (in zone)</label><input id="optSimpDetail" type="number" value="0.05" step="0.02"><span class="unit">mm</span></div>
         <div class="btns"><button id="btnZone">Detail zone: off</button><button id="btnZoneEdit" style="display:none">Move / resize zone</button></div>
         <div class="note">Drag the detail zone over the face (eyes, nose, mouth): inside it every short line and fine curve is kept; outside it, hair wisps are dropped and curves are simplified.</div>
       </div>
@@ -170,12 +170,12 @@
       <h2>5 · Speed <span class="note" style="margin-left:auto">no caps</span></h2>
       <div class="body">
         <div class="preset" data-group="speed"><select class="pSel"></select><button class="pSave" title="Save the current values under a new name">Save as…</button><button class="pUpd" title="Overwrite the selected saved preset with the values on screen">Update</button><button class="pDef" title="Load this preset automatically when the page opens">★ Default</button><button class="pDel" title="Delete this saved preset">Delete</button></div>
-        <div class="row"><label>Draw speed</label><input id="spDraw" type="number" value="6000" step="500"><span class="unit">mm/min</span></div>
+        <div class="row"><label>Draw speed</label><input id="spDraw" type="number" value="3500" step="500"><span class="unit">mm/min</span></div>
         <div class="row"><label>Travel speed</label><input id="spTravel" type="number" value="7000" step="500"><span class="unit">mm/min</span></div>
         <div class="row"><label>Pen lift speed</label><input id="spZ" type="number" value="2000" step="500"><span class="unit">mm/min</span></div>
-        <div class="row"><label>Acceleration (draw)</label><input id="acc" type="number" value="600" step="100"><span class="unit">mm/s²</span></div>
+        <div class="row"><label>Acceleration (draw)</label><input id="acc" type="number" value="400" step="100"><span class="unit">mm/s²</span></div>
         <div class="row"><label>Acceleration (travel)</label><input id="accT" type="number" value="1000" step="100"><span class="unit">mm/s²</span></div>
-        <div class="row"><label>Jerk</label><input id="jerk" type="number" value="8" step="1"><span class="unit">mm/s</span></div>
+        <div class="row"><label>Jerk</label><input id="jerk" type="number" value="5" step="1"><span class="unit">mm/s</span></div>
         <div class="row"><label>Joint-space travel</label><input id="fastTravel" type="checkbox"></div>
         <div class="row"><label>Commands in flight</label><input id="inflight" type="number" value="8" min="1" max="8" step="1"><span class="unit"></span></div>
         <div class="note">Firmware ceiling is 18,000 mm/min and 3,000 mm/s². Rotrics ships at 60 mm/s² — that's the main reason it feels slow.</div>
@@ -1061,8 +1061,8 @@ window.DEXARM_PEN_OFFSET=114;
   // ---------- persistence ----------
   const PERSIST = ['imgMode', 'imgThr', 'imgInv', 'imgRes', 'imgSpeck', 'imgPrune', 'imgSmooth', 'imgBlur', 'paper', 'orient', 'margin', 'paperX', 'paperY',
     'optOrder', 'optJoin', 'optSeg', 'optTurn', 'optSimp', 'optMin', 'optMinDetail', 'optSimpDetail', 'spDraw', 'spTravel', 'spZ', 'acc', 'accT', 'jerk', 'fastTravel', 'inflight', 'zDown', 'zLift', 'zSafe', 'jogStep', 'jogSpeed', 'qPause', 'qPreview', 'qPreviewSecs', 'qSize', 'qSizeCustom', 'qPlace'];
-  function saveSettings() { try { const o = {}; for (const id of PERSIST) { const e = $(id); o[id] = e.type === 'checkbox' ? e.checked : e.value; } localStorage.setItem('dexdraw.settings.v8', JSON.stringify(o)); } catch (_) { } }
-  function loadSettings() { try { const o = JSON.parse(localStorage.getItem('dexdraw.settings.v8') || '{}'); for (const id of PERSIST) if (id in o) { const e = $(id); if (e.type === 'checkbox') e.checked = !!o[id]; else e.value = o[id]; } } catch (_) { } }
+  function saveSettings() { try { const o = {}; for (const id of PERSIST) { const e = $(id); o[id] = e.type === 'checkbox' ? e.checked : e.value; } localStorage.setItem('dexdraw.settings.v9', JSON.stringify(o)); } catch (_) { } }
+  function loadSettings() { try { const o = JSON.parse(localStorage.getItem('dexdraw.settings.v9') || '{}'); for (const id of PERSIST) if (id in o) { const e = $(id); if (e.type === 'checkbox') e.checked = !!o[id]; else e.value = o[id]; } } catch (_) { } }
   loadSettings();
   const num = id => parseFloat($(id).value) || 0;
 
@@ -1263,7 +1263,8 @@ window.DEXARM_PEN_OFFSET=114;
   const GROUPS = {
     speed: { fields: ['spDraw', 'spTravel', 'spZ', 'acc', 'accT', 'jerk', 'fastTravel', 'inflight', 'jogSpeed', 'jogStep', 'zLift', 'zSafe'],
       builtin: {
-        'Smooth (default)': { spDraw: 6000, spTravel: 7000, spZ: 2000, acc: 600, accT: 1000, jerk: 8, fastTravel: false, inflight: 8, jogSpeed: 6000, zLift: 5 },
+        'Quality (default)': { spDraw: 3500, spTravel: 7000, spZ: 2000, acc: 400, accT: 1000, jerk: 5, fastTravel: false, inflight: 8, jogSpeed: 6000, jogStep: 10, zLift: 5, zSafe: 20 },
+        'Smooth': { spDraw: 6000, spTravel: 7000, spZ: 2000, acc: 600, accT: 1000, jerk: 8, fastTravel: false, inflight: 8, jogSpeed: 6000, jogStep: 10, zLift: 5, zSafe: 20 },
         'Fast': { spDraw: 6000, spTravel: 12000, spZ: 4000, acc: 1200, accT: 2000, jerk: 8, fastTravel: false, inflight: 8, jogSpeed: 6000, zLift: 5 },
         'Faster': { spDraw: 10000, spTravel: 15000, spZ: 5000, acc: 2000, accT: 3000, jerk: 10, fastTravel: false, inflight: 8, jogSpeed: 8000, zLift: 5 },
         'Max': { spDraw: 18000, spTravel: 18000, spZ: 6000, acc: 3000, accT: 3000, jerk: 15, fastTravel: false, inflight: 8, jogSpeed: 8000, zLift: 4 },
@@ -1271,14 +1272,14 @@ window.DEXARM_PEN_OFFSET=114;
       }, after: () => { S.gcode = ''; updateButtons(); draw(); } },
     conv: { fields: ['imgMode', 'imgThr', 'imgInv', 'imgRes', 'imgSpeck', 'imgSmooth', 'imgPrune', 'imgBlur', 'optOrder', 'optJoin', 'optSeg', 'optTurn', 'optSimp', 'optMin', 'optMinDetail', 'optSimpDetail'],
       builtin: {
-        'AI line art — full figure (default)': { imgMode: 'ink', imgThr: 187, imgInv: false, imgRes: 2800, imgSpeck: 11, imgSmooth: 3, imgPrune: 4, imgBlur: false, optOrder: true, optJoin: 0.6, optSeg: 2.5, optTurn: 5, optSimp: 0.1, optMin: 2, optMinDetail: 1, optSimpDetail: 0.06 },
+        'AI line art — full figure (default)': { imgMode: 'ink', imgThr: 187, imgInv: false, imgRes: 2800, imgSpeck: 11, imgSmooth: 3, imgPrune: 4, imgBlur: false, optOrder: true, optJoin: 0.6, optSeg: 1.5, optTurn: 4, optSimp: 0.08, optMin: 1.5, optMinDetail: 1, optSimpDetail: 0.05 },
         'Line art portrait — drop hair wisps': { imgMode: 'ink', imgThr: 187, imgInv: false, imgRes: 2800, imgSpeck: 11, imgSmooth: 6, imgPrune: 4, imgBlur: false, optOrder: true, optJoin: 0.6, optSeg: 2.5, optTurn: 5, optSimp: 0.25, optMin: 8, optMinDetail: 1, optSimpDetail: 0.06 },
         'Line art — keep everything': { imgMode: 'ink', imgThr: 200, imgInv: false, imgRes: 1600, imgSpeck: 4, imgSmooth: 2, imgPrune: 16, imgBlur: false, optOrder: true, optJoin: 0.6, optSeg: 2, optTurn: 4, optSimp: 0.08, optMin: 1.5, optMinDetail: 1, optSimpDetail: 0.06 },
         'Logo / bold shapes': { imgMode: 'ink', imgThr: 160, imgInv: false, imgRes: 1600, imgSpeck: 20, imgSmooth: 3, imgPrune: 20, imgBlur: false, optOrder: true, optJoin: 1, optSeg: 3, optTurn: 6, optSimp: 0.15, optMin: 3, optMinDetail: 1, optSimpDetail: 0.08 },
         'Photo (edges)': { imgMode: 'edge', imgThr: 150, imgInv: false, imgRes: 1200, imgSpeck: 25, imgSmooth: 3, imgPrune: 12, imgBlur: true, optOrder: true, optJoin: 1, optSeg: 3, optTurn: 8, optSimp: 0.2, optMin: 10, optMinDetail: 2, optSimpDetail: 0.1 }
       }, after: () => { for (const o of S.objects) if (o.kind === 'image') retrace(o); refresh(); } }
   };
-  const PKEY = 'dexdraw.presets.v2';
+  const PKEY = 'dexdraw.presets.v3';
   function loadPresets() { try { return JSON.parse(localStorage.getItem(PKEY) || '{}'); } catch (_) { return {}; } }
   function savePresets(p) { try { localStorage.setItem(PKEY, JSON.stringify(p)); } catch (_) { } }
   function readGroup(g) { const o = {}; for (const id of GROUPS[g].fields) { const e = $(id); o[id] = e.type === 'checkbox' ? e.checked : (isNaN(+e.value) || e.tagName === 'SELECT' ? e.value : +e.value); } return o; }
