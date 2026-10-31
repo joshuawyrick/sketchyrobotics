@@ -55,7 +55,7 @@
   #prog>div{height:100%;width:0;background:var(--acc2);transition:width .2s}
   #console{height:180px;overflow:auto;user-select:text;cursor:text;background:#0f1419;color:#e6e8ee;border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:11.5px var(--mono);white-space:pre-wrap}
   #console .tx{color:#8ab4ff}#console .rx{color:#c6cdd8}#console .err{color:#ff6b6b}#console .sys{color:#5aa9ff}
-  .preset{display:grid;grid-template-columns:1fr auto;gap:5px;margin:6px 0}.preset select{grid-column:1/-1;width:100%;min-width:0;background:#fff;border:1px solid #c9d1dd;border-radius:5px;padding:5px;font:13px var(--font)}.preset button{font-size:12px;padding:5px 8px}
+  .preset{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin:6px 0}.preset select{grid-column:1/-1;width:100%;min-width:0;background:#fff;border:1px solid #c9d1dd;border-radius:5px;padding:5px;font:13px var(--font)}.preset button{font-size:12px;padding:5px 8px}
   label[title]{cursor:help;text-decoration:underline dotted #9aa3b2;text-underline-offset:3px}
   .note{font-size:11.5px;color:var(--mut);margin:4px 0}
   .warn{background:#fff4d6;border:1px solid #e6c36a;color:#6b4e00;padding:8px 10px;border-radius:6px;font-size:12.5px;margin-bottom:8px}
@@ -108,7 +108,7 @@
         <div id="drop"><b>Drop a PNG / JPG / SVG here</b><br>or click to choose a file<input id="file" type="file" accept=".svg,.png,.jpg,.jpeg,.gif,.bmp,.webp,image/*" style="display:none"></div>
         <div class="note" id="fileInfo">No file loaded.</div>
         <div class="row" style="margin-top:8px"><label>Conversion preset <span class="note">(trace + path rules)</span></label></div>
-        <div class="preset" data-group="conv"><select class="pSel"></select><button class="pSave" title="Save the current trace + path settings under a name">Save as…</button><button class="pDef" title="Load this preset automatically when the page opens">★ Default</button><button class="pDel" title="Delete this saved preset">Delete</button></div>
+        <div class="preset" data-group="conv"><select class="pSel"></select><button class="pSave" title="Save the current trace + path settings under a new name">Save as…</button><button class="pUpd" title="Overwrite the selected saved preset with the values on screen">Update</button><button class="pDef" title="Load this preset automatically when the page opens">★ Default</button><button class="pDel" title="Delete this saved preset">Delete</button></div>
         <div id="imgOpts" style="display:none">
           <div class="row"><label>Trace mode</label><select id="imgMode"><option value="ink">Line art</option><option value="edge">Edges (photos)</option></select></div>
           <div class="row"><label>Threshold <span id="thrV">187</span></label><input id="imgThr" type="range" min="1" max="254" value="187"></div>
@@ -167,7 +167,7 @@
     <section>
       <h2>5 · Speed <span class="note" style="margin-left:auto">no caps</span></h2>
       <div class="body">
-        <div class="preset" data-group="speed"><select class="pSel"></select><button class="pSave" title="Save the current values under a name">Save as…</button><button class="pDef" title="Load this preset automatically when the page opens">★ Default</button><button class="pDel" title="Delete this saved preset">Delete</button></div>
+        <div class="preset" data-group="speed"><select class="pSel"></select><button class="pSave" title="Save the current values under a new name">Save as…</button><button class="pUpd" title="Overwrite the selected saved preset with the values on screen">Update</button><button class="pDef" title="Load this preset automatically when the page opens">★ Default</button><button class="pDel" title="Delete this saved preset">Delete</button></div>
         <div class="row"><label>Draw speed</label><input id="spDraw" type="number" value="6000" step="500"><span class="unit">mm/min</span></div>
         <div class="row"><label>Travel speed</label><input id="spTravel" type="number" value="7000" step="500"><span class="unit">mm/min</span></div>
         <div class="row"><label>Pen lift speed</label><input id="spZ" type="number" value="2000" step="500"><span class="unit">mm/min</span></div>
@@ -1233,7 +1233,7 @@ window.DEXARM_PEN_OFFSET=114;
 
   // ---------- named presets (speed, conversion) ----------
   const GROUPS = {
-    speed: { fields: ['spDraw', 'spTravel', 'spZ', 'acc', 'accT', 'jerk', 'fastTravel', 'inflight', 'jogSpeed', 'zLift'],
+    speed: { fields: ['spDraw', 'spTravel', 'spZ', 'acc', 'accT', 'jerk', 'fastTravel', 'inflight', 'jogSpeed', 'jogStep', 'zLift', 'zSafe'],
       builtin: {
         'Smooth (default)': { spDraw: 6000, spTravel: 7000, spZ: 2000, acc: 600, accT: 1000, jerk: 8, fastTravel: false, inflight: 8, jogSpeed: 6000, zLift: 5 },
         'Fast': { spDraw: 6000, spTravel: 12000, spZ: 4000, acc: 1200, accT: 2000, jerk: 8, fastTravel: false, inflight: 8, jogSpeed: 6000, zLift: 5 },
@@ -1260,16 +1260,20 @@ window.DEXARM_PEN_OFFSET=114;
     const add = (name, kind) => { const op = document.createElement('option'); op.value = kind + ':' + name; op.textContent = (store.def === op.value ? '★ ' : '') + name; sel.appendChild(op); };
     for (const n in GROUPS[g].builtin) add(n, 'builtin'); for (const n in store.saved) add(n, 'saved');
     if (store.def && [...sel.options].some(o => o.value === store.def)) sel.value = store.def; else sel.selectedIndex = 0;
-    box.querySelector('.pDel').disabled = !sel.value.startsWith('saved:');
+    box.querySelector('.pDel').disabled = !sel.value.startsWith('saved:'); box.querySelector('.pUpd').disabled = !sel.value.startsWith('saved:');
   }
   function presetVals(g, key) { const [kind, name] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)]; return kind === 'saved' ? (loadPresets()[g] || { saved: {} }).saved[name] : GROUPS[g].builtin[name]; }
   for (const g in GROUPS) {
     const box = document.querySelector(`.preset[data-group="${g}"]`), sel = box.querySelector('.pSel');
     fillPresetUI(g);
-    sel.addEventListener('change', () => { const v = presetVals(g, sel.value); if (v) applyGroup(g, v); box.querySelector('.pDel').disabled = !sel.value.startsWith('saved:'); log(`${g === 'speed' ? 'speed' : 'conversion'} preset applied: ${sel.options[sel.selectedIndex].textContent}`); });
+    sel.addEventListener('change', () => { const v = presetVals(g, sel.value); if (v) applyGroup(g, v); box.querySelector('.pDel').disabled = !sel.value.startsWith('saved:'); box.querySelector('.pUpd').disabled = !sel.value.startsWith('saved:'); log(`${g === 'speed' ? 'speed' : 'conversion'} preset applied: ${sel.options[sel.selectedIndex].textContent}`); });
     box.querySelector('.pSave').addEventListener('click', () => {
       const name = (prompt('Name for this ' + (g === 'speed' ? 'speed' : 'conversion') + ' preset:') || '').trim(); if (!name) return;
       const all = loadPresets(); all[g] = all[g] || { saved: {}, def: null }; all[g].saved[name] = readGroup(g); savePresets(all); fillPresetUI(g); sel.value = 'saved:' + name; box.querySelector('.pDel').disabled = false; log(`saved preset "${name}"`);
+    });
+    box.querySelector('.pUpd').addEventListener('click', () => {
+      if (!sel.value.startsWith('saved:')) { log('pick one of your saved presets first (built-ins can\'t be changed — use Save as…)', 'err'); return; }
+      const name = sel.value.slice(6); const all = loadPresets(); all[g].saved[name] = readGroup(g); savePresets(all); log(`preset "${name}" updated with the current values`);
     });
     box.querySelector('.pDef').addEventListener('click', () => { const all = loadPresets(); all[g] = all[g] || { saved: {}, def: null }; all[g].def = sel.value; savePresets(all); fillPresetUI(g); log(`"${sel.options[sel.selectedIndex].textContent.replace('★ ', '')}" is now the default ${g === 'speed' ? 'speed' : 'conversion'} preset`); });
     box.querySelector('.pDel').addEventListener('click', () => { if (!sel.value.startsWith('saved:')) return; const name = sel.value.slice(6); const all = loadPresets(); delete all[g].saved[name]; if (all[g].def === sel.value) all[g].def = null; savePresets(all); fillPresetUI(g); log(`deleted preset "${name}"`); });
