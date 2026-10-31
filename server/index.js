@@ -22,21 +22,22 @@ for (const d of [DATA, THEMES, JOBS]) fs.mkdirSync(d, { recursive: true });
 // we write into it and restore from it at startup, so themes/prompts/photos/art survive. Local disk stays the
 // working copy, so nothing else in the server needs to know.
 let bucket = null;
-try { if (process.env.REPLIT_OBJECT_STORAGE_BUCKET || process.env.REPL_ID) { const { Client } = require(process.env.OBJECT_STORAGE_MODULE || '@replit/object-storage'); bucket = new Client(); } } catch (e) { console.log('object storage not available:', e.message); bucket = null; }
+const BUCKET_ID = process.env.OBJECT_STORAGE_BUCKET || process.env.REPLIT_OBJECT_STORAGE_BUCKET || '';
+try { if (BUCKET_ID || process.env.REPL_ID) { const { Client } = require(process.env.OBJECT_STORAGE_MODULE || '@replit/object-storage'); bucket = new Client(BUCKET_ID ? { bucketId: BUCKET_ID } : undefined); } } catch (e) { console.log('object storage not available:', e.message); bucket = null; }
 const rel = f => path.relative(DATA, f).split(path.sep).join('/');
 function persist(file) { if (!bucket) return; const key = rel(file); fs.promises.readFile(file).then(buf => bucket.uploadFromBytes(key, buf)).then(r => { if (r && !r.ok) console.error('storage upload failed', key, r.error && r.error.message); }).catch(e => console.error('storage upload', key, e.message)); }
 function unpersist(prefix) { if (!bucket) return; bucket.list().then(r => { if (!r.ok) return; for (const o of r.value) if (o.name.startsWith(rel(prefix) + '/')) bucket.delete(o.name).catch(() => {}); }).catch(() => {}); }
 async function restoreFromBucket() {
   if (!bucket) { console.log('storage: local disk only (no Replit bucket)'); return; }
   const r = await bucket.list().catch(e => ({ ok: false, error: e }));
-  if (!r.ok) { console.log('storage: bucket unreachable, local disk only:', r.error && r.error.message); bucket = null; return; }
+  if (!r.ok) { console.log('storage: bucket unreachable, local disk only:', r.error && r.error.message, BUCKET_ID ? '' : '— set Secret OBJECT_STORAGE_BUCKET to your App Storage bucket name (e.g. repl-default-bucket-...)'); bucket = null; return; }
   let n = 0;
   for (const o of r.value) {
     const dest = path.join(DATA, o.name); if (fs.existsSync(dest)) continue;
     const d = await bucket.downloadAsBytes(o.name); if (!d.ok) continue;
     fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.writeFileSync(dest, d.value); n++;
   }
-  console.log(`storage: Replit bucket connected, restored ${n} file(s)`);
+  console.log(`storage: Replit bucket connected (${BUCKET_ID || 'default'}), restored ${n} file(s)`);
 }
 
 const PORT = process.env.PORT || 3000;
