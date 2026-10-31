@@ -21,4 +21,5 @@ Admin → Themes → + Add theme → paste a master prompt into each combination
 3. iPad: open `/`, Add to Home Screen once; guests take it from there.
 4. Admin on your phone: `/admin` to watch the queue, retry failures, move someone to the front.
 
-Data (themes, photos, line art, queue) lives in `data/` — on Replit Autoscale set `DATA_DIR` to a persistent path if you want it to survive redeploys; otherwise download finished art from Admin.
+## Durable storage
+Autoscale deployments wipe the local disk on every redeploy. The server mirrors everything in `data/` (themes, prompts, thumbnails, photos, line art, queue) to **Replit Object Storage** and restores from it at startup. Set it up once: in the Repl, open **Tools → Object Storage → Create bucket** (default bucket, any name). No code or secrets needed — the SDK finds it automatically. Admin → Settings shows "✓ bucket connected" when it's working. Without a bucket the app still runs, but a redeploy starts empty.

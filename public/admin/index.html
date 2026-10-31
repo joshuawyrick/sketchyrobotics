@@ -72,6 +72,7 @@
 
   <section class="tab" id="tab-settings">
     <div class="card"><h2>OpenAI</h2>
+      <div class="row"><label>Durable storage</label><span id="durState"></span><span class="note">Replit Object Storage keeps themes, prompts and sketches across redeploys. Add a bucket in Replit's Object Storage tool if this says missing.</span></div>
       <div class="row"><label>API key</label><span id="keyState"></span><span class="note">Set as the Secret <code>OPENAI_API_KEY</code> in Replit.</span></div>
       <div class="row"><label>Model</label><select id="sModel" style="max-width:260px"><option value="chatgpt-image-latest">chatgpt-image-latest (same as ChatGPT)</option><option value="gpt-image-2">gpt-image-2</option><option value="gpt-image-1.5">gpt-image-1.5</option><option value="gpt-image-1-mini">gpt-image-1-mini (cheapest)</option></select></div>
       <div class="row"><label>Quality</label><select id="sQuality" style="max-width:200px"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="auto">auto</option></select></div>
@@ -158,7 +159,7 @@
     $('tRun').disabled = false;
   };
   // ----- settings -----
-  function renderSettings() { const s = STATE.settings; $('keyState').innerHTML = STATE.hasKey ? '<span class="ok">✓ set</span>' : '<span class="bad">✗ missing</span>'; $('sModel').value = s.model; $('sQuality').value = s.quality; $('sSize').value = s.size; $('sFid').value = s.inputFidelity || ''; $('sConc').value = s.concurrency; $('sEvent').value = s.eventName || ''; }
+  function renderSettings() { const s = STATE.settings; $('durState').innerHTML = STATE.durable ? '<span class="ok">✓ bucket connected</span>' : '<span class="bad">✗ local disk only</span>'; $('keyState').innerHTML = STATE.hasKey ? '<span class="ok">✓ set</span>' : '<span class="bad">✗ missing</span>'; $('sModel').value = s.model; $('sQuality').value = s.quality; $('sSize').value = s.size; $('sFid').value = s.inputFidelity || ''; $('sConc').value = s.concurrency; $('sEvent').value = s.eventName || ''; }
   $('sSave').onclick = async () => { await api('/api/admin/settings', { method: 'POST', json: { model: $('sModel').value, quality: $('sQuality').value, size: $('sSize').value, inputFidelity: $('sFid').value, concurrency: +$('sConc').value || 1, eventName: $('sEvent').value } }); $('sMsg').textContent = 'Saved ✓'; setTimeout(() => $('sMsg').textContent = '', 2000); };
   if (TOKEN) refresh(); else showLogin();
   setInterval(() => { if (TOKEN && $('tab-queue').classList.contains('on')) refresh(); }, 5000);

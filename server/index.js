@@ -17,6 +17,28 @@ const THEMES = path.join(DATA, 'themes');
 const JOBS = path.join(DATA, 'jobs');
 for (const d of [DATA, THEMES, JOBS]) fs.mkdirSync(d, { recursive: true });
 
+// ---------- durable storage mirror (Replit Object Storage) ----------
+// Autoscale deployments lose the local disk on every redeploy. If a bucket is available we mirror every file
+// we write into it and restore from it at startup, so themes/prompts/photos/art survive. Local disk stays the
+// working copy, so nothing else in the server needs to know.
+let bucket = null;
+try { if (process.env.REPLIT_OBJECT_STORAGE_BUCKET || process.env.REPL_ID) { const { Client } = require(process.env.OBJECT_STORAGE_MODULE || '@replit/object-storage'); bucket = new Client(); } } catch (e) { console.log('object storage not available:', e.message); bucket = null; }
+const rel = f => path.relative(DATA, f).split(path.sep).join('/');
+function persist(file) { if (!bucket) return; const key = rel(file); fs.promises.readFile(file).then(buf => bucket.uploadFromBytes(key, buf)).then(r => { if (r && !r.ok) console.error('storage upload failed', key, r.error && r.error.message); }).catch(e => console.error('storage upload', key, e.message)); }
+function unpersist(prefix) { if (!bucket) return; bucket.list().then(r => { if (!r.ok) return; for (const o of r.value) if (o.name.startsWith(rel(prefix) + '/')) bucket.delete(o.name).catch(() => {}); }).catch(() => {}); }
+async function restoreFromBucket() {
+  if (!bucket) { console.log('storage: local disk only (no Replit bucket)'); return; }
+  const r = await bucket.list().catch(e => ({ ok: false, error: e }));
+  if (!r.ok) { console.log('storage: bucket unreachable, local disk only:', r.error && r.error.message); bucket = null; return; }
+  let n = 0;
+  for (const o of r.value) {
+    const dest = path.join(DATA, o.name); if (fs.existsSync(dest)) continue;
+    const d = await bucket.downloadAsBytes(o.name); if (!d.ok) continue;
+    fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.writeFileSync(dest, d.value); n++;
+  }
+  console.log(`storage: Replit bucket connected, restored ${n} file(s)`);
+}
+
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'sketchy';
 const OPENAI_KEY = process.env.OPENAI_API_KEY || '';
@@ -26,7 +48,7 @@ const OPENAI_BASE = process.env.OPENAI_BASE || 'https://api.openai.com';
 const SETTINGS_FILE = path.join(DATA, 'settings.json');
 const DEFAULT_SETTINGS = { model: 'chatgpt-image-latest', quality: 'medium', size: '1024x1536', inputFidelity: '', concurrency: 2, autoRun: true, pauseBetween: true, eventName: 'Sketchy Robotics' };
 function getSettings() { try { return Object.assign({}, DEFAULT_SETTINGS, JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))); } catch (_) { return Object.assign({}, DEFAULT_SETTINGS); } }
-function saveSettings(s) { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2)); }
+function saveSettings(s) { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2)); persist(SETTINGS_FILE); }
 
 // ---------- themes ----------
 // data/themes/<slug>/theme.json { name, enabled, order }, thumb.png, prompts/<variant>.txt
@@ -43,18 +65,21 @@ function readTheme(slug) {
 function listThemes() { return fs.readdirSync(THEMES).map(readTheme).filter(Boolean).sort((a, b) => (a.order || 0) - (b.order || 0) || a.name.localeCompare(b.name)); }
 function writeTheme(slug, t) {
   const dir = path.join(THEMES, slug); fs.mkdirSync(path.join(dir, 'prompts'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'theme.json'), JSON.stringify({ name: t.name, enabled: t.enabled !== false, order: t.order || 0 }, null, 2));
-  if (t.prompts) for (const v of VARIANTS) if (v in t.prompts) fs.writeFileSync(path.join(dir, 'prompts', v + '.txt'), String(t.prompts[v] || ''));
+  fs.writeFileSync(path.join(dir, 'theme.json'), JSON.stringify({ name: t.name, enabled: t.enabled !== false, order: t.order || 0 }, null, 2)); persist(path.join(dir, 'theme.json'));
+  if (t.prompts) for (const v of VARIANTS) if (v in t.prompts) { const f = path.join(dir, 'prompts', v + '.txt'); fs.writeFileSync(f, String(t.prompts[v] || '')); persist(f); }
 }
-if (!listThemes().length) writeTheme('evil-clown', { name: 'Evil Clown', enabled: true, order: 1, prompts: {} });
+
 
 // ---------- jobs ----------
 // data/jobs/<id>/job.json, photo.jpg, art.png
-const jobs = new Map();
-for (const id of fs.readdirSync(JOBS)) { try { jobs.set(id, JSON.parse(fs.readFileSync(path.join(JOBS, id, 'job.json'), 'utf8'))); } catch (_) { } }
-for (const j of jobs.values()) if (j.status === 'processing') { j.status = 'pending'; } // server restarted mid-call
-let seq = Math.max(0, ...[...jobs.values()].map(j => j.number || 0));
-function saveJob(j) { fs.mkdirSync(path.join(JOBS, j.id), { recursive: true }); fs.writeFileSync(path.join(JOBS, j.id, 'job.json'), JSON.stringify(j, null, 2)); jobs.set(j.id, j); }
+const jobs = new Map(); let seq = 0;
+function loadState() {
+  if (!listThemes().length) writeTheme('evil-clown', { name: 'Evil Clown', enabled: true, order: 1, prompts: {} });
+  for (const id of fs.readdirSync(JOBS)) { try { jobs.set(id, JSON.parse(fs.readFileSync(path.join(JOBS, id, 'job.json'), 'utf8'))); } catch (_) { } }
+  for (const j of jobs.values()) if (j.status === 'processing') { j.status = 'pending'; } // server restarted mid-call
+  seq = Math.max(0, ...[...jobs.values()].map(j => j.number || 0));
+}
+function saveJob(j) { fs.mkdirSync(path.join(JOBS, j.id), { recursive: true }); const f = path.join(JOBS, j.id, 'job.json'); fs.writeFileSync(f, JSON.stringify(j, null, 2)); jobs.set(j.id, j); if (!j.test) persist(f); }
 function publicJob(j) { const { id, number, status, theme, themeName, variant, createdAt, readyAt, error, attempts, position } = j; return { id, number, status, theme, themeName, variant, createdAt, readyAt, error, attempts, position }; }
 function sortedJobs() { return [...jobs.values()].sort((a, b) => (a.priority || 0) - (b.priority || 0) || a.createdAt - b.createdAt); }
 function queuePosition(id) { let n = 0; for (const j of sortedJobs()) { if (['pending', 'processing', 'ready', 'drawing'].includes(j.status)) { n++; if (j.id === id) return n; } } return null; }
@@ -83,6 +108,7 @@ async function generateArt(job) {
   const png = await sharp(Buffer.from(b64, 'base64')).flatten({ background: '#ffffff' }).png().toBuffer();
   fs.writeFileSync(path.join(JOBS, job.id, 'art.png'), png);
   await sharp(png).resize(400, 400, { fit: 'inside' }).png().toFile(path.join(JOBS, job.id, 'art-thumb.png'));
+  if (!job.test) { persist(path.join(JOBS, job.id, 'art.png')); persist(path.join(JOBS, job.id, 'art-thumb.png')); }
 }
 let running = 0;
 async function pump() {
@@ -125,7 +151,7 @@ app.post('/api/jobs', upload.single('photo'), async (req, res) => {
     fs.mkdirSync(path.join(JOBS, id), { recursive: true });
     // EXIF-rotate, limit size, save as jpg
     await sharp(req.file.buffer).rotate().resize(1536, 1536, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 92 }).toFile(path.join(JOBS, id, 'photo.jpg'));
-    saveJob(job); pump();
+    persist(path.join(JOBS, id, 'photo.jpg')); saveJob(job); pump();
     res.json(Object.assign(publicJob(job), { position: queuePosition(id) }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -142,12 +168,12 @@ app.post('/api/jobs/:id/status', (req, res) => { const j = jobs.get(req.params.i
 
 // ----- admin -----
 app.post('/api/admin/login', (req, res) => { if ((req.body.password || '') === ADMIN_PASSWORD) res.json({ ok: true, token: ADMIN_PASSWORD }); else res.status(401).json({ error: 'wrong password' }); });
-app.get('/api/admin/state', adminAuth, (req, res) => res.json({ settings: getSettings(), themes: listThemes(), variants: VARIANT_LABELS, variantOrder: VARIANTS, jobs: sortedJobs().slice(-200).map(j => Object.assign(publicJob(j), { guestName: j.guestName, priority: j.priority })), hasKey: !!OPENAI_KEY }));
+app.get('/api/admin/state', adminAuth, (req, res) => res.json({ settings: getSettings(), themes: listThemes(), variants: VARIANT_LABELS, variantOrder: VARIANTS, jobs: sortedJobs().slice(-200).map(j => Object.assign(publicJob(j), { guestName: j.guestName, priority: j.priority })), hasKey: !!OPENAI_KEY, durable: !!bucket }));
 app.post('/api/admin/settings', adminAuth, (req, res) => { const s = Object.assign(getSettings(), req.body || {}); saveSettings(s); res.json(s); });
 app.post('/api/admin/themes', adminAuth, (req, res) => { const name = String(req.body.name || '').trim(); if (!name) return res.status(400).json({ error: 'name required' }); let slug = slugify(name); if (readTheme(slug)) slug += '-' + Date.now().toString(36); writeTheme(slug, { name, enabled: true, order: listThemes().length + 1, prompts: {} }); res.json(readTheme(slug)); });
 app.put('/api/admin/themes/:slug', adminAuth, (req, res) => { const t = readTheme(slugify(req.params.slug)); if (!t) return res.status(404).end(); writeTheme(t.slug, Object.assign(t, req.body, { prompts: Object.assign(t.prompts, req.body.prompts || {}) })); res.json(readTheme(t.slug)); });
-app.delete('/api/admin/themes/:slug', adminAuth, (req, res) => { const d = path.join(THEMES, slugify(req.params.slug)); if (fs.existsSync(d)) fs.rmSync(d, { recursive: true }); res.json({ ok: true }); });
-app.post('/api/admin/themes/:slug/thumb', adminAuth, upload.single('thumb'), async (req, res) => { const t = readTheme(slugify(req.params.slug)); if (!t || !req.file) return res.status(400).end(); await sharp(req.file.buffer).rotate().resize(600, 600, { fit: 'cover' }).png().toFile(path.join(THEMES, t.slug, 'thumb.png')); res.json({ ok: true }); });
+app.delete('/api/admin/themes/:slug', adminAuth, (req, res) => { const d = path.join(THEMES, slugify(req.params.slug)); if (fs.existsSync(d)) { fs.rmSync(d, { recursive: true }); unpersist(d); } res.json({ ok: true }); });
+app.post('/api/admin/themes/:slug/thumb', adminAuth, upload.single('thumb'), async (req, res) => { const t = readTheme(slugify(req.params.slug)); if (!t || !req.file) return res.status(400).end(); await sharp(req.file.buffer).rotate().resize(600, 600, { fit: 'cover' }).png().toFile(path.join(THEMES, t.slug, 'thumb.png')); persist(path.join(THEMES, t.slug, 'thumb.png')); res.json({ ok: true }); });
 app.post('/api/admin/test', adminAuth, upload.single('photo'), async (req, res) => { // run a prompt against a photo without queueing for the arm
   try {
     const id = 'test-' + crypto.randomBytes(4).toString('hex');
@@ -165,9 +191,9 @@ app.post('/api/admin/jobs/:id', adminAuth, (req, res) => { // actions: retry, fr
   else if (a === 'front') { j.priority = -Date.now(); }
   else if (a === 'skip') { j.status = 'skipped'; }
   else if (a === 'requeue') { j.status = fs.existsSync(path.join(JOBS, j.id, 'art.png')) ? 'ready' : 'pending'; }
-  else if (a === 'delete') { jobs.delete(j.id); fs.rmSync(path.join(JOBS, j.id), { recursive: true, force: true }); return res.json({ ok: true }); }
+  else if (a === 'delete') { jobs.delete(j.id); fs.rmSync(path.join(JOBS, j.id), { recursive: true, force: true }); unpersist(path.join(JOBS, j.id)); return res.json({ ok: true }); }
   saveJob(j); pump(); res.json(publicJob(j));
 });
 app.get('/api/jobs/:id/photo', adminAuth, (req, res) => { const f = path.join(JOBS, req.params.id, 'photo.jpg'); if (fs.existsSync(f)) res.sendFile(f); else res.status(404).end(); });
 
-app.listen(PORT, '0.0.0.0', () => console.log(`Sketchy Robotics server on :${PORT}  data=${DATA}  key=${OPENAI_KEY ? 'set' : 'MISSING'}`));
+restoreFromBucket().catch(e => console.log('storage restore failed:', e.message)).then(() => { loadState(); app.listen(PORT, '0.0.0.0', () => console.log(`Sketchy Robotics server on :${PORT}  data=${DATA}  key=${OPENAI_KEY ? 'set' : 'MISSING'}`)); });
