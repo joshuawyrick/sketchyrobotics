@@ -64,6 +64,9 @@
       <div class="row"><label>Theme</label><select id="tTheme" style="max-width:260px"></select></div>
       <div class="row"><label>Combination</label><select id="tVar" style="max-width:260px"></select></div>
       <div class="row"><label>Photo</label><input type="file" id="tPhoto" accept="image/*"></div>
+      <div class="row"><label>Model (this test only)</label><select id="tModel" style="max-width:300px"><option value="">(use Settings)</option></select><button id="tModels">List models on my key</button></div>
+      <div class="row"><label>Quality (this test only)</label><select id="tQuality" style="max-width:200px"><option value="">(use Settings)</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option></select></div>
+      <div class="row"><label>Input fidelity (this test only)</label><select id="tFid" style="max-width:200px"><option value="">(use Settings)</option><option value="high">high</option><option value="low">low</option></select></div>
       <div class="row"><button class="primary" id="tRun">Generate</button><span id="tMsg" class="note"></span></div>
       <div id="testOut"></div>
       <p class="note">Happy with it? The result can be sent to the robot queue with the button that appears under the image.</p>
@@ -151,13 +154,14 @@
   $('tRun').onclick = async () => {
     const f = $('tPhoto').files[0]; if (!f) return alert('Choose a photo first');
     $('tRun').disabled = true; $('tMsg').textContent = 'Generating… (20–60 s)'; $('testOut').innerHTML = ''; const t0 = Date.now();
-    try { const fd = new FormData(); fd.append('photo', f); fd.append('theme', $('tTheme').value); fd.append('variant', $('tVar').value);
+    try { const fd = new FormData(); fd.append('photo', f); fd.append('theme', $('tTheme').value); fd.append('variant', $('tVar').value); if ($('tModel').value) fd.append('model', $('tModel').value); if ($('tQuality').value) fd.append('quality', $('tQuality').value); if ($('tFid').value) fd.append('inputFidelity', $('tFid').value);
       const r = await api('/api/admin/test', { method: 'POST', body: fd });
-      $('tMsg').textContent = `Done in ${((Date.now() - t0) / 1000).toFixed(0)} s`; $('testOut').innerHTML = `<img src="${r.art}?v=${Date.now()}"><div class="row"><a href="${r.art}" download="test-line-art.png"><button>Download PNG</button></a><button class="primary" id="tQueue">Send this one to the robot queue</button></div>`;
+      $('tMsg').textContent = `Done in ${r.seconds} s · model ${r.used.model} · quality ${r.used.quality} · fidelity ${r.used.inputFidelity || 'default'}`; $('testOut').innerHTML = `<img src="${r.art}?v=${Date.now()}"><div class="row"><a href="${r.art}" download="test-line-art.png"><button>Download PNG</button></a><button class="primary" id="tQueue">Send this one to the robot queue</button></div>`;
       $('tQueue').onclick = async () => { await api('/api/admin/jobs/' + r.id, { method: 'POST', json: { action: 'requeue' } }); $('tQueue').textContent = 'Queued ✓'; $('tQueue').disabled = true; };
     } catch (e) { $('tMsg').textContent = ''; $('testOut').innerHTML = `<p class="bad">${e.message}</p>`; }
     $('tRun').disabled = false;
   };
+  $('tModels').onclick = async () => { $('tModels').disabled = true; try { const r = await api('/api/admin/models'); const sel = $('tModel'); sel.innerHTML = '<option value="">(use Settings)</option>' + r.models.map(m => `<option value="${m}">${m}</option>`).join(''); $('sModel').innerHTML = r.models.map(m => `<option value="${m}">${m}</option>`).join(''); $('sModel').value = STATE.settings.model; $('tMsg').textContent = r.models.length + ' image models available'; } catch (e) { $('tMsg').textContent = e.message; } $('tModels').disabled = false; };
   // ----- settings -----
   function renderSettings() { const s = STATE.settings; $('durState').innerHTML = STATE.durable ? '<span class="ok">✓ bucket connected</span>' : '<span class="bad">✗ local disk only</span>'; $('keyState').innerHTML = STATE.hasKey ? '<span class="ok">✓ set</span>' : '<span class="bad">✗ missing</span>'; $('sModel').value = s.model; $('sQuality').value = s.quality; $('sSize').value = s.size; $('sFid').value = s.inputFidelity || ''; $('sConc').value = s.concurrency; $('sEvent').value = s.eventName || ''; }
   $('sSave').onclick = async () => { await api('/api/admin/settings', { method: 'POST', json: { model: $('sModel').value, quality: $('sQuality').value, size: $('sSize').value, inputFidelity: $('sFid').value, concurrency: +$('sConc').value || 1, eventName: $('sEvent').value } }); $('sMsg').textContent = 'Saved ✓'; setTimeout(() => $('sMsg').textContent = '', 2000); };

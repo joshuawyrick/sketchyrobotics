@@ -88,8 +88,8 @@ function sortedJobs() { return [...jobs.values()].sort((a, b) => (a.priority || 
 function queuePosition(id) { let n = 0; for (const j of sortedJobs()) { if (['pending', 'processing', 'ready', 'drawing'].includes(j.status)) { n++; if (j.id === id) return n; } } return null; }
 
 // ---------- OpenAI ----------
-async function generateArt(job) {
-  const s = getSettings();
+async function generateArt(job, override) {
+  const s = Object.assign(getSettings(), override || {});
   const theme = readTheme(job.theme); if (!theme) throw new Error('theme missing');
   const prompt = (theme.prompts[job.variant] || '').trim(); if (!prompt) throw new Error(`no prompt saved for ${theme.name} / ${VARIANT_LABELS[job.variant]}`);
   if (!OPENAI_KEY) throw new Error('OPENAI_API_KEY is not set in Secrets');
@@ -177,14 +177,19 @@ app.post('/api/admin/themes', adminAuth, (req, res) => { const name = String(req
 app.put('/api/admin/themes/:slug', adminAuth, (req, res) => { const t = readTheme(slugify(req.params.slug)); if (!t) return res.status(404).end(); writeTheme(t.slug, Object.assign(t, req.body, { prompts: Object.assign(t.prompts, req.body.prompts || {}) })); res.json(readTheme(t.slug)); });
 app.delete('/api/admin/themes/:slug', adminAuth, (req, res) => { const d = path.join(THEMES, slugify(req.params.slug)); if (fs.existsSync(d)) { fs.rmSync(d, { recursive: true }); unpersist(d); } res.json({ ok: true }); });
 app.post('/api/admin/themes/:slug/thumb', adminAuth, upload.single('thumb'), async (req, res) => { const t = readTheme(slugify(req.params.slug)); if (!t || !req.file) return res.status(400).end(); await sharp(req.file.buffer).rotate().resize(600, 600, { fit: 'cover' }).png().toFile(path.join(THEMES, t.slug, 'thumb.png')); persist(path.join(THEMES, t.slug, 'thumb.png')); res.json({ ok: true }); });
+app.get('/api/admin/models', adminAuth, async (req, res) => {
+  try { const r = await fetch(OPENAI_BASE + '/v1/models', { headers: { Authorization: 'Bearer ' + OPENAI_KEY } }); const j = await r.json(); if (!r.ok) throw new Error(j.error && j.error.message || r.status);
+    res.json({ models: (j.data || []).map(m => m.id).filter(id => /image/i.test(id)).sort() }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post('/api/admin/test', adminAuth, upload.single('photo'), async (req, res) => { // run a prompt against a photo without queueing for the arm
   try {
     const id = 'test-' + crypto.randomBytes(4).toString('hex');
     const job = { id, number: 0, status: 'processing', theme: slugify(req.body.theme), variant: req.body.variant, createdAt: Date.now(), attempts: 1, test: true };
     fs.mkdirSync(path.join(JOBS, id), { recursive: true });
     await sharp(req.file.buffer).rotate().resize(1536, 1536, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 92 }).toFile(path.join(JOBS, id, 'photo.jpg'));
-    jobs.set(id, job); await generateArt(job); job.status = 'test'; saveJob(job);
-    res.json({ id, art: `/api/jobs/${id}/art` });
+    const override = {}; for (const k of ['model', 'quality', 'size', 'inputFidelity']) if (req.body[k]) override[k] = String(req.body[k]);
+    jobs.set(id, job); const t0 = Date.now(); await generateArt(job, override); job.status = 'test'; job.override = override; saveJob(job);
+    res.json({ id, art: `/api/jobs/${id}/art`, used: Object.assign({ model: getSettings().model, quality: getSettings().quality, size: getSettings().size, inputFidelity: getSettings().inputFidelity }, override), seconds: Math.round((Date.now() - t0) / 1000) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/admin/jobs/:id', adminAuth, (req, res) => { // actions: retry, front, skip, requeue (draw again)
