@@ -18,7 +18,7 @@
   input[type=text],input[type=number],input[type=password],select,textarea{width:100%;border:1px solid #c9d1dd;border-radius:7px;padding:8px;font:13px system-ui;background:#fff}
   textarea{min-height:120px;font:13px/1.45 ui-monospace,Menlo,monospace;resize:vertical}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
-  .theme{border:1px solid var(--line);border-radius:12px;overflow:hidden;cursor:pointer;background:#fff;text-align:center}.theme img,.theme .ph{width:100%;aspect-ratio:1;object-fit:cover;background:#e9eef7;display:block}.theme .ph{display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:40px}.theme .nm{padding:8px;font-weight:700}.theme.off{opacity:.5}
+  .theme{border:1px solid var(--line);border-radius:12px;overflow:hidden;cursor:pointer;background:#fff;text-align:center}.theme img,.theme .ph{width:100%;aspect-ratio:1;object-fit:contain;background:#fff;display:block}.theme .ph{display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:40px}.theme .nm{padding:8px;font-weight:700}.theme.off{opacity:.5}
   .theme.on{outline:3px solid var(--blue)}
   .row{display:flex;gap:10px;align-items:center;margin:8px 0;flex-wrap:wrap}.row label{min-width:170px;color:var(--mut)}
   .prompt{margin:12px 0}.prompt h3{margin:0 0 4px;font-size:13px}.prompt .cnt{float:right;color:var(--mut);font-weight:400}
@@ -52,7 +52,7 @@
       <div class="row"><label>Name</label><input type="text" id="teNameIn" style="max-width:300px"></div>
       <div class="row"><label>Show on iPad</label><input type="checkbox" id="teEnabled"></div>
       <div class="row"><label>Order (lower = first)</label><input type="number" id="teOrder" style="max-width:100px"></div>
-      <div class="row"><label>Thumbnail (square image)</label><input type="file" id="teThumb" accept="image/*"><img id="teThumbPrev" style="height:70px;border-radius:8px;border:1px solid var(--line)"></div>
+      <div class="row"><label>Thumbnail (any shape; shown whole)</label><input type="file" id="teThumb" accept="image/*"><img id="teThumbPrev" style="height:90px;max-width:160px;object-fit:contain;background:#fff;border-radius:8px;border:1px solid var(--line)"></div>
       <p class="note">Paste the locked-in master prompt for each combination. Leave a box empty and that option won't be offered on the iPad for this theme. Each prompt must stand on its own (style, line weight, white background, no shading…) — the guest's photo is attached as the input image.</p>
       <div id="prompts"></div>
       <div class="row"><button class="primary" id="teSave">Save theme</button><button class="danger" id="teDelete">Delete theme</button><span id="teMsg" class="ok"></span></div>
