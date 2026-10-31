@@ -22,11 +22,14 @@ for (const d of [DATA, THEMES, JOBS]) fs.mkdirSync(d, { recursive: true });
 // we write into it and restore from it at startup, so themes/prompts/photos/art survive. Local disk stays the
 // working copy, so nothing else in the server needs to know.
 let bucket = null;
+// Replit sets REPLIT_DEPLOYMENT=1 only in the published app. In the dev workspace we still READ the bucket
+// (so the Agent can test with real themes) but never write to it, so testing can't disturb the live data.
+const IS_DEPLOYMENT = process.env.REPLIT_DEPLOYMENT === '1' || process.env.STORAGE_WRITE === '1';
 const BUCKET_ID = process.env.OBJECT_STORAGE_BUCKET || process.env.DEFAULT_OBJECT_STORAGE_BUCKET_ID || process.env.DEFAULT_OBJECT_STORAGE_BUCKET || process.env.REPLIT_OBJECT_STORAGE_BUCKET || '';
 try { if (BUCKET_ID || process.env.REPL_ID) { const { Client } = require(process.env.OBJECT_STORAGE_MODULE || '@replit/object-storage'); bucket = new Client(BUCKET_ID ? { bucketId: BUCKET_ID } : undefined); } } catch (e) { console.log('object storage not available:', e.message); bucket = null; }
 const rel = f => path.relative(DATA, f).split(path.sep).join('/');
-function persist(file) { if (!bucket) return; const key = rel(file); fs.promises.readFile(file).then(buf => bucket.uploadFromBytes(key, buf)).then(r => { if (r && !r.ok) console.error('storage upload failed', key, r.error && r.error.message); }).catch(e => console.error('storage upload', key, e.message)); }
-function unpersist(prefix) { if (!bucket) return; bucket.list().then(r => { if (!r.ok) return; for (const o of r.value) if (o.name.startsWith(rel(prefix) + '/')) bucket.delete(o.name).catch(() => {}); }).catch(() => {}); }
+function persist(file) { if (!bucket || !IS_DEPLOYMENT) return; const key = rel(file); fs.promises.readFile(file).then(buf => bucket.uploadFromBytes(key, buf)).then(r => { if (r && !r.ok) console.error('storage upload failed', key, r.error && r.error.message); }).catch(e => console.error('storage upload', key, e.message)); }
+function unpersist(prefix) { if (!bucket || !IS_DEPLOYMENT) return; bucket.list().then(r => { if (!r.ok) return; for (const o of r.value) if (o.name.startsWith(rel(prefix) + '/')) bucket.delete(o.name).catch(() => {}); }).catch(() => {}); }
 async function restoreFromBucket() {
   if (!bucket) { console.log('storage: local disk only (no Replit bucket)'); return; }
   const r = await bucket.list().catch(e => ({ ok: false, error: e }));
@@ -34,12 +37,12 @@ async function restoreFromBucket() {
   let n = 0;
   for (const o of r.value) {
     if (!o.name || o.name.endsWith('/') || !/^(themes|jobs)\/|^settings\.json$/.test(o.name)) continue; // skip folders and anything that isn't ours
-    const dest = path.join(DATA, o.name); if (fs.existsSync(dest)) continue;
+    const dest = path.join(DATA, o.name); if (fs.existsSync(dest) && IS_DEPLOYMENT) continue; // deployment: local == what we wrote; dev: always take the bucket's copy
     let d; try { d = await bucket.downloadAsBytes(o.name); } catch (e) { continue; } if (!d.ok) continue;
     const buf = Array.isArray(d.value) ? Buffer.concat(d.value.map(x => Buffer.isBuffer(x) ? x : Buffer.from(x))) : Buffer.from(d.value); // real SDK returns [Buffer]
     fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.writeFileSync(dest, buf); n++;
   }
-  console.log(`storage: Replit bucket connected (${BUCKET_ID || 'default'}), restored ${n} file(s)`);
+  console.log(`storage: Replit bucket connected (${BUCKET_ID || 'default'}), restored ${n} file(s)` + (IS_DEPLOYMENT ? '' : ' — dev workspace: read-only, nothing here is written back to the bucket'));
 }
 
 const PORT = process.env.PORT || 3000;
@@ -171,8 +174,8 @@ app.post('/api/jobs/:id/status', (req, res) => { const j = jobs.get(req.params.i
 
 // ----- admin -----
 app.post('/api/admin/login', (req, res) => { if ((req.body.password || '') === ADMIN_PASSWORD) res.json({ ok: true, token: ADMIN_PASSWORD }); else res.status(401).json({ error: 'wrong password' }); });
-app.get('/api/admin/state', adminAuth, (req, res) => res.json({ settings: getSettings(), themes: listThemes(), variants: VARIANT_LABELS, variantOrder: VARIANTS, jobs: sortedJobs().slice(-200).map(j => Object.assign(publicJob(j), { guestName: j.guestName, priority: j.priority })), hasKey: !!OPENAI_KEY, durable: !!bucket }));
-app.post('/api/admin/settings', adminAuth, (req, res) => { const s = Object.assign(getSettings(), req.body || {}); saveSettings(s); res.json(s); });
+app.get('/api/admin/state', adminAuth, (req, res) => res.json({ settings: getSettings(), themes: listThemes(), variants: VARIANT_LABELS, variantOrder: VARIANTS, jobs: sortedJobs().slice(-200).map(j => Object.assign(publicJob(j), { guestName: j.guestName, priority: j.priority })), hasKey: !!OPENAI_KEY, durable: !!bucket, readOnly: !!bucket && !IS_DEPLOYMENT }));
+app.post('/api/admin/settings', adminAuth, (req, res) => { const body = req.body || {}; const allowed = ['model', 'quality', 'size', 'inputFidelity', 'concurrency', 'eventName', 'cameraZoom']; const s = getSettings(); for (const k of allowed) if (k in body) s[k] = body[k]; saveSettings(s); res.json(Object.assign({ ok: true, durable: !!bucket && IS_DEPLOYMENT }, s)); });
 app.post('/api/admin/themes', adminAuth, (req, res) => { const name = String(req.body.name || '').trim(); if (!name) return res.status(400).json({ error: 'name required' }); let slug = slugify(name); if (readTheme(slug)) slug += '-' + Date.now().toString(36); writeTheme(slug, { name, enabled: true, order: listThemes().length + 1, prompts: {} }); res.json(readTheme(slug)); });
 app.put('/api/admin/themes/:slug', adminAuth, (req, res) => { const t = readTheme(slugify(req.params.slug)); if (!t) return res.status(404).end(); writeTheme(t.slug, Object.assign(t, req.body, { prompts: Object.assign(t.prompts, req.body.prompts || {}) })); res.json(readTheme(t.slug)); });
 app.delete('/api/admin/themes/:slug', adminAuth, (req, res) => { const d = path.join(THEMES, slugify(req.params.slug)); if (fs.existsSync(d)) { fs.rmSync(d, { recursive: true }); unpersist(d); } res.json({ ok: true }); });
