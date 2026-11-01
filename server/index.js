@@ -30,17 +30,23 @@ try { if (BUCKET_ID || process.env.REPL_ID) { const { Client } = require(process
 const rel = f => path.relative(DATA, f).split(path.sep).join('/');
 function persist(file) { if (!bucket || !IS_DEPLOYMENT) return; const key = rel(file); fs.promises.readFile(file).then(buf => bucket.uploadFromBytes(key, buf)).then(r => { if (r && !r.ok) console.error('storage upload failed', key, r.error && r.error.message); }).catch(e => console.error('storage upload', key, e.message)); }
 function unpersist(prefix) { if (!bucket || !IS_DEPLOYMENT) return; bucket.list().then(r => { if (!r.ok) return; for (const o of r.value) if (o.name.startsWith(rel(prefix) + '/')) bucket.delete(o.name).catch(() => {}); }).catch(() => {}); }
+const toBuf = d => Array.isArray(d.value) ? Buffer.concat(d.value.map(x => Buffer.isBuffer(x) ? x : Buffer.from(x))) : Buffer.from(d.value); // real SDK returns [Buffer]
+async function download(key, dest) { let d; try { d = await bucket.downloadAsBytes(key); } catch (e) { return false; } if (!d.ok) return false; fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.writeFileSync(dest, toBuf(d)); return true; }
+/** photos/art are fetched from the bucket the first time they're needed (keeps startup fast) */
+async function ensureLocal(file) { if (fs.existsSync(file)) return true; if (!bucket) return false; return download(rel(file), file); }
 async function restoreFromBucket() {
   if (!bucket) { console.log('storage: local disk only (no Replit bucket)'); return; }
   const r = await bucket.list().catch(e => ({ ok: false, error: e }));
   if (!r.ok) { console.log('storage: bucket unreachable, local disk only:', r.error && r.error.message, BUCKET_ID ? '' : '— set Secret OBJECT_STORAGE_BUCKET to your App Storage bucket name (e.g. repl-default-bucket-...)'); bucket = null; return; }
+  // The bucket is the source of truth. The published app's disk starts as a stale snapshot of the workspace (and is wiped on every
+  // redeploy anyway), so in deployment we throw the snapshot away and rebuild from the bucket: small files now, photos/art on demand.
+  if (IS_DEPLOYMENT) { for (const d of [THEMES, JOBS]) fs.rmSync(d, { recursive: true, force: true }); fs.rmSync(SETTINGS_FILE, { force: true }); for (const d of [THEMES, JOBS]) fs.mkdirSync(d, { recursive: true }); }
   let n = 0;
   for (const o of r.value) {
     if (!o.name || o.name.endsWith('/') || !/^(themes|jobs)\/|^settings\.json$/.test(o.name)) continue; // skip folders and anything that isn't ours
-    const dest = path.join(DATA, o.name); if (fs.existsSync(dest) && IS_DEPLOYMENT) continue; // deployment: local == what we wrote; dev: always take the bucket's copy
-    let d; try { d = await bucket.downloadAsBytes(o.name); } catch (e) { continue; } if (!d.ok) continue;
-    const buf = Array.isArray(d.value) ? Buffer.concat(d.value.map(x => Buffer.isBuffer(x) ? x : Buffer.from(x))) : Buffer.from(d.value); // real SDK returns [Buffer]
-    fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.writeFileSync(dest, buf); n++;
+    const dest = path.join(DATA, o.name);
+    if (IS_DEPLOYMENT && /\/(photo\.jpg|art\.png|art-thumb\.png)$/.test(o.name)) continue; // big files: fetched when first requested
+    if (await download(o.name, dest)) n++;
   }
   console.log(`storage: Replit bucket connected (${BUCKET_ID || 'default'}), restored ${n} file(s)` + (IS_DEPLOYMENT ? '' : ' — dev workspace: read-only, nothing here is written back to the bucket'));
 }
@@ -96,7 +102,7 @@ async function generateArt(job, override) {
   const theme = readTheme(job.theme); if (!theme) throw new Error('theme missing');
   const prompt = (theme.prompts[job.variant] || '').trim(); if (!prompt) throw new Error(`no prompt saved for ${theme.name} / ${VARIANT_LABELS[job.variant]}`);
   if (!OPENAI_KEY) throw new Error('OPENAI_API_KEY is not set in Secrets');
-  const photo = fs.readFileSync(path.join(JOBS, job.id, 'photo.jpg'));
+  const photoFile = path.join(JOBS, job.id, 'photo.jpg'); if (!(await ensureLocal(photoFile))) throw new Error('photo missing'); const photo = fs.readFileSync(photoFile);
   const form = new FormData();
   form.append('model', s.model); form.append('prompt', prompt); form.append('n', '1');
   if (s.size) form.append('size', s.size); if (s.quality) form.append('quality', s.quality);
@@ -162,7 +168,7 @@ app.post('/api/jobs', upload.single('photo'), async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/jobs/:id', (req, res) => { const j = jobs.get(req.params.id); if (!j) return res.status(404).json({ error: 'not found' }); res.json(Object.assign(publicJob(j), { position: queuePosition(j.id) })); });
-app.get('/api/jobs/:id/art', (req, res) => { const f = path.join(JOBS, req.params.id, req.query.thumb ? 'art-thumb.png' : 'art.png'); if (fs.existsSync(f)) res.sendFile(f); else res.status(404).end(); });
+app.get('/api/jobs/:id/art', async (req, res) => { const f = path.join(JOBS, req.params.id, req.query.thumb ? 'art-thumb.png' : 'art.png'); if (await ensureLocal(f)) res.sendFile(f); else res.status(404).end(); });
 
 // ----- operator (studio) — unauthenticated on purpose: it only reads art and reports progress; the laptop is yours -----
 app.get('/api/queue', (req, res) => { res.json({ settings: getSettings(), jobs: sortedJobs().filter(j => j.status !== 'done' && j.status !== 'skipped').map(publicJob), done: sortedJobs().filter(j => j.status === 'done').slice(-10).map(publicJob) }); });
@@ -206,10 +212,10 @@ app.post('/api/admin/jobs/:id', adminAuth, (req, res) => { // actions: retry, fr
   if (a === 'retry') { j.status = 'pending'; j.attempts = 0; j.error = null; }
   else if (a === 'front') { j.priority = -Date.now(); }
   else if (a === 'skip') { j.status = 'skipped'; }
-  else if (a === 'requeue') { j.status = fs.existsSync(path.join(JOBS, j.id, 'art.png')) ? 'ready' : 'pending'; }
+  else if (a === 'requeue') { j.status = (j.readyAt || fs.existsSync(path.join(JOBS, j.id, 'art.png'))) ? 'ready' : 'pending'; }
   else if (a === 'delete') { jobs.delete(j.id); fs.rmSync(path.join(JOBS, j.id), { recursive: true, force: true }); unpersist(path.join(JOBS, j.id)); return res.json({ ok: true }); }
   saveJob(j); pump(); res.json(publicJob(j));
 });
-app.get('/api/jobs/:id/photo', adminAuth, (req, res) => { const f = path.join(JOBS, req.params.id, 'photo.jpg'); if (fs.existsSync(f)) res.sendFile(f); else res.status(404).end(); });
+app.get('/api/jobs/:id/photo', adminAuth, async (req, res) => { const f = path.join(JOBS, req.params.id, 'photo.jpg'); if (await ensureLocal(f)) res.sendFile(f); else res.status(404).end(); });
 
 restoreFromBucket().catch(e => console.log('storage restore failed:', e.message)).then(() => { loadState(); app.listen(PORT, '0.0.0.0', () => console.log(`Sketchy Robotics server on :${PORT}  data=${DATA}  key=${OPENAI_KEY ? 'set' : 'MISSING'}`)); });
