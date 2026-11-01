@@ -60,6 +60,8 @@
   .note{font-size:11.5px;color:var(--mut);margin:4px 0}
   .warn{background:#fff4d6;border:1px solid #e6c36a;color:#6b4e00;padding:8px 10px;border-radius:6px;font-size:12.5px;margin-bottom:8px}
   .pill{display:inline-block;font:11px var(--mono);padding:1px 6px;border-radius:10px;background:#e9eef7;color:var(--mut);margin-left:6px}
+  .qCur{display:flex;align-items:center;gap:10px;border:2px solid var(--acc);border-radius:10px;padding:6px 8px;background:#eaf2ff;margin-bottom:8px}.qCur img{height:64px;width:64px;object-fit:contain;background:#fff;border-radius:6px}.qCur b{font-size:14px}
+  button.big{font-size:15px;padding:10px 16px}
   .qList{display:flex;flex-direction:column;gap:6px;margin-top:8px;max-height:260px;overflow:auto}.qItem{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:8px;padding:4px 6px;background:#fff}.qItem img{height:44px;width:44px;object-fit:contain;background:#fff;border-radius:4px}.qItem>div{flex:1;font-size:12.5px}.qItem.drawing{border-color:var(--acc);background:#eaf2ff}.qItem button{padding:2px 7px;min-height:0;font-size:12px}
   #ctx{position:fixed;display:none;background:#fff;border:1px solid #c9d1dd;border-radius:6px;padding:4px;z-index:9;box-shadow:0 6px 20px rgba(0,0,0,.5)}
   #ctx button{display:flex;justify-content:flex-start;width:100%;text-align:left;background:none;border:0;padding:6px 12px;min-height:0}#ctx button:hover{background:#e9eef7}
@@ -205,10 +207,12 @@
     <section>
       <h2>Event queue <span class="note" id="qSum" style="margin-left:auto"></span></h2>
       <div class="body">
-        <div class="btns"><button id="btnQAuto" class="primary">▶ Auto-run queue</button><button id="btnQNext">Sketch next</button><button id="btnQContinue" class="primary" style="display:none">Continue →</button><button id="btnQSkipCur" class="danger">Skip current</button></div>
+        <div class="qCur" id="qCur" style="display:none"><img id="qCurImg" alt=""><div><b id="qCurName"></b><div class="note" id="qCurNote"></div></div></div>
+        <div class="btns"><button id="btnQNext" class="primary big">1 · Load next sketch</button><button id="btnQDraw" class="primary big" style="display:none">2 · Draw it</button><button id="btnQContinue" class="primary big" style="display:none">Continue →</button><button id="btnQSkipCur" class="danger">✕ Skip</button></div>
         <div class="note" id="qStatus">Guests' sketches appear here when ready.</div>
-        <div class="row"><label>Pause after each drawing (to change paper)</label><input id="qPause" type="checkbox" checked></div>
-        <div class="row"><label>Show preview before drawing</label><input id="qPreview" type="checkbox" checked><input id="qPreviewSecs" type="number" value="6" min="0" step="1" style="width:56px"><span class="unit">s</span></div>
+        <div class="btns" style="margin-top:8px"><span class="note" style="align-self:center">Hands-free:</span><button id="btnQAuto">▶ Auto-run queue</button></div>
+        <div class="row"><label>Auto-run: pause after each drawing (to change paper)</label><input id="qPause" type="checkbox" checked></div>
+        <div class="row"><label>Auto-run: preview countdown before drawing</label><input id="qPreview" type="checkbox" checked><input id="qPreviewSecs" type="number" value="6" min="0" step="1" style="width:56px"><span class="unit">s</span></div>
         <div class="row"><label>Drawing size for this event</label><select id="qSize"><option value="fit">Fit to page</option><option value="4">4 in wide</option><option value="5">5 in wide</option><option value="6" selected>6 in wide</option><option value="7">7 in wide</option><option value="8">8 in wide</option><option value="custom">Custom…</option></select></div>
         <div class="row" id="qSizeCustomRow" style="display:none"><label>Custom width</label><input id="qSizeCustom" type="number" value="5.5" step="0.25" min="1"><span class="unit">in</span></div>
         <div class="row"><label>Place on page</label><select id="qPlace"><option value="center" selected>Centered</option><option value="top">Top (leave room below)</option><option value="bottom">Bottom (leave room above)</option></select></div>
@@ -1071,6 +1075,7 @@ window.DEXARM_PEN_OFFSET=114;
 (() => {
   const $ = id => document.getElementById(id);
   const IN = 25.4;
+  let qInit = false; // set once the queue module below has initialised
   const S = {
     objects: [],         // { id, name, kind, img?, polylines (source units), sw, sh, x, y (center mm), w, h (mm), rot, mirror, placed }
     selected: null,
@@ -1370,7 +1375,7 @@ window.DEXARM_PEN_OFFSET=114;
   $('btnPos').addEventListener('click', guard(() => link.send('M114')));
   $('btnMotorsOff').addEventListener('click', guard(() => link.send('M84')));
   $('btnEstop').addEventListener('click', async () => {
-    S.stopFlag = true; S.needsHome = true; if (typeof Q !== 'undefined' && Q.on) { Q.on = false; syncQ(); }
+    S.stopFlag = true; S.needsHome = true; if (qInit && Q.on) { Q.on = false; syncQ(); }
     const n = await link.stop(); log(`STOP sent — the arm no longer knows where it is: press ⌂ Home before drawing again${n ? ' (' + n + ' unacked lines discarded)' : ''}`, 'err'); updateButtons();
   });
   document.querySelectorAll('.jog button[data-j]').forEach(b => b.addEventListener('click', guard(async () => {
@@ -1419,6 +1424,7 @@ window.DEXARM_PEN_OFFSET=114;
     $('btnPause').disabled = !S.running; $('btnStop').disabled = !S.running;
     $('blockMsg').textContent = S.needsHome && link.connected ? '⚠ STOP was used — press ⌂ Home before drawing' : S.block ? '⚠ ' + S.block : '';
     if (!S.running) $('btnPause').textContent = '⏸ Pause';
+    if (qInit) syncStep();
   }
 
   // ---------- preview canvas ----------
@@ -1540,7 +1546,7 @@ window.DEXARM_PEN_OFFSET=114;
     $('stats').style.color = S.block ? '#b51f33' : '';
   }
   // ---------- event queue + auto-run (talks to the Sketchy server when hosted by it) ----------
-  const Q = { on: false, busy: false, current: null, timer: null, available: false };
+  const Q = { on: false, busy: false, current: null, loaded: null, timer: null, available: false }; qInit = true;
   async function qFetch(url, opts) { const r = await fetch(url, opts); if (!r.ok) throw new Error(url + ' ' + r.status); return r.json(); }
   async function qStatus(id, status, error) { // report a job's outcome; retries so a network hiccup can't leave it stuck in "drawing"
     for (let i = 0; i < 5; i++) { try { return await qFetch('/api/jobs/' + id + '/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status, error: error || '' }) }); } catch (e) { if (i === 4) throw e; await new Promise(r => setTimeout(r, 1500)); } }
@@ -1553,35 +1559,64 @@ window.DEXARM_PEN_OFFSET=114;
     $('qSum').textContent = `${ready.length} ready · ${proc.length} generating · ${d.done.length} drawn`;
     $('qList').innerHTML = d.jobs.filter(j => ['ready', 'drawing'].includes(j.status)).slice(0, 12).map(j => `<div class="qItem ${j.status}" data-id="${j.id}"><img src="/api/jobs/${j.id}/art?thumb=1"><div><b>#${j.number}</b> ${j.themeName}<br><span class="note">${j.status === 'drawing' ? '✎ drawing now' : 'ready'}</span></div><button data-skip="${j.id}" title="Skip this one">✕</button></div>`).join('') || '<div class="note">Nothing ready yet.</div>';
     $('qList').querySelectorAll('button[data-skip]').forEach(b => b.onclick = async () => { await qFetch('/api/jobs/' + b.dataset.skip + '/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'skipped' }) }); qRefresh(); });
-    $('btnQNext').disabled = !ready.length || S.running || Q.busy || !link.connected || S.needsHome;
+    $('btnQNext').disabled = !ready.length || S.running || Q.busy || !link.connected || S.needsHome || !!Q.loaded; $('btnQNext').textContent = ready.length ? `1 · Load next sketch (${ready.length} waiting)` : '1 · Load next sketch'; syncStep();
     if (S.needsHome && Q.on) { Q.on = false; syncQ(); $('qStatus').textContent = 'STOP was used — press ⌂ Home, then start again'; }
-    if (Q.on && !Q.busy && !S.running && !Q.waitingContinue) { if (ready.length) { if (link.connected) qDrawNext(); else $('qStatus').textContent = 'auto-run: waiting for the arm to reconnect…'; } else if (!/done|problem|stopped/.test($('qStatus').textContent)) $('qStatus').textContent = 'auto-run on — waiting for the next guest…'; }
+    if (Q.on && !Q.busy && !S.running && !Q.waitingContinue) { if (ready.length || Q.loaded) { if (link.connected) qAutoStep(); else $('qStatus').textContent = 'auto-run: waiting for the arm to reconnect…'; } else if (!/done|problem|stopped/.test($('qStatus').textContent)) $('qStatus').textContent = 'auto-run on — waiting for the next guest…'; }
   }
-  async function qDrawNext() {
-    if (Q.busy || S.running) return; Q.busy = true; $('btnQNext').disabled = true;
+  const fmtS = sec => `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}`;
+  function syncStep() { // the one-button-at-a-time controls
+    const j = Q.loaded;
+    $('qCur').style.display = j ? '' : 'none';
+    if (j) { $('qCurImg').src = `/api/jobs/${j.id}/art?thumb=1`; $('qCurName').textContent = `#${j.number} · ${j.themeName}`; $('qCurNote').textContent = S.plan ? `${S.plan.strokes.length} strokes · about ${fmtS(Planner.estimateSeconds(S.plan, gcodeOpts()))}` : ''; }
+    $('btnQNext').style.display = j ? 'none' : ''; $('btnQDraw').style.display = j ? '' : 'none';
+    $('btnQDraw').disabled = !j || S.running || Q.busy || !link.connected || S.needsHome || !!S.block;
+    $('btnQSkipCur').disabled = !j && !S.running && !Q.busy;
+  }
+  /** step 1: take the next ready sketch, convert it, size and place it on the canvas — then wait for the operator */
+  async function qLoadNext() {
+    if (Q.busy || S.running || Q.loaded) return false; Q.busy = true; $('btnQNext').disabled = true; let job = null;
     try {
-      const { job } = await qFetch('/api/queue/claim', { method: 'POST' }); if (!job) { Q.busy = false; return; }
-      Q.current = job; $('qStatus').textContent = `#${job.number} ${job.themeName}: loading…`;
+      ({ job } = await qFetch('/api/queue/claim', { method: 'POST' })); if (!job) { $('qStatus').textContent = 'Nothing ready yet — it loads as soon as a guest\'s sketch is finished.'; return false; }
+      Q.current = job; $('qStatus').textContent = `#${job.number} ${job.themeName}: converting…`;
       await loadFromUrl(`/api/jobs/${job.id}/art`, `queue-${job.number}.png`);
-      // wait for the trace worker + planner to settle
-      await new Promise(r => setTimeout(r, 400)); for (let i = 0; i < 100 && (S.planDirty || !S.plan); i++) await new Promise(r => setTimeout(r, 200));
+      await new Promise(r => setTimeout(r, 400)); for (let i = 0; i < 100 && (S.planDirty || !S.plan); i++) await new Promise(r => setTimeout(r, 200)); // trace worker + planner
       applyEventSize(); for (let i = 0; i < 50 && S.planDirty; i++) await new Promise(r => setTimeout(r, 100));
       if (S.block) throw new Error(S.block);
-      if ($('qPreview').checked) { $('qStatus').textContent = `#${job.number}: check the preview — drawing in ${num('qPreviewSecs')} s (press Skip to cancel)`; Q.cancelPreview = false; for (let i = 0; i < num('qPreviewSecs') * 10; i++) { if (Q.cancelPreview) throw new Error('skipped by operator'); await new Promise(r => setTimeout(r, 100)); } }
+      Q.loaded = job; Q.current = null; syncStep();
+      $('qStatus').textContent = `#${job.number} is on the canvas — check it, then press 2 · Draw it (or ✕ Skip).`;
+      return true;
+    } catch (e) {
+      log('queue: ' + e.message, 'err'); $('qStatus').textContent = 'problem with #' + (job ? job.number : '?') + ': ' + e.message + ' — it was marked failed; load the next one.';
+      if (job) await qStatus(job.id, 'failed', e.message).catch(() => {}); Q.current = null; clearCanvas(); return false;
+    } finally { Q.busy = false; syncStep(); qRefresh(); }
+  }
+  /** step 2: draw the loaded sketch, report it, clear the canvas */
+  async function qDrawLoaded() {
+    const job = Q.loaded; if (!job || Q.busy || S.running) return false; Q.busy = true; let ok = false;
+    try {
       generate(); if (!S.gcode) throw new Error(S.block || 'no g-code');
-      $('qStatus').textContent = `#${job.number}: drawing…`;
-      const ok = await runDrawing();
+      Q.current = job; $('qStatus').textContent = `#${job.number}: drawing…`; syncStep();
+      ok = await runDrawing();
       await qStatus(job.id, ok ? 'done' : 'ready', ok ? '' : 'stopped by operator'); // a stopped drawing goes back to the front of the line
-      Q.current = null; clearCanvas();
-      $('qStatus').textContent = ok ? `#${job.number} done ✓` : `#${job.number} stopped — it stays first in line; press Sketch next to redraw it or ✕ to skip it`;
-      if (ok && Q.on && $('qPause').checked) { Q.waitingContinue = true; $('qStatus').textContent = `#${job.number} done ✓ — change the paper, then press Continue`; $('btnQContinue').style.display = ''; }
-      else if (ok && Q.on) $('qStatus').textContent = `#${job.number} done ✓ — next one starts automatically`;
-      if (!ok) { Q.on = false; syncQ(); }
+      Q.loaded = null; Q.current = null; clearCanvas();
+      $('qStatus').textContent = ok ? `#${job.number} done ✓ — fresh paper in, then 1 · Load next sketch.` : `#${job.number} stopped — it is back at the front of the line. Load next sketch draws it again; ✕ in the list skips it.`;
+      if (!ok && Q.on) { Q.on = false; syncQ(); }
     } catch (e) {
       log('queue: ' + e.message, 'err'); $('qStatus').textContent = 'problem: ' + e.message;
-      if (Q.current) { await qStatus(Q.current.id, /skipped/.test(e.message) ? 'skipped' : 'failed', e.message).catch(() => {}); Q.current = null; clearCanvas(); }
-    }
-    Q.busy = false; Q.current = null; qRefresh();
+      await qStatus(job.id, 'failed', e.message).catch(() => {}); Q.loaded = null; Q.current = null; clearCanvas();
+    } finally { Q.busy = false; syncStep(); qRefresh(); }
+    return ok;
+  }
+  async function qSkipLoaded() { const job = Q.loaded; if (!job || S.running || Q.busy) return; await qStatus(job.id, 'skipped', 'skipped by operator').catch(() => {}); Q.loaded = null; clearCanvas(); $('qStatus').textContent = `#${job.number} skipped.`; syncStep(); qRefresh(); }
+  /** hands-free: load → preview countdown → draw → (pause for paper) → repeat */
+  async function qAutoStep() {
+    if (!Q.loaded) { if (!(await qLoadNext())) return; if (!Q.on) return; }
+    const job = Q.loaded;
+    if ($('qPreview').checked && num('qPreviewSecs') > 0) { Q.cancelPreview = false; for (let i = num('qPreviewSecs') * 10; i > 0; i--) { if (!Q.on || Q.cancelPreview) break; if (i % 10 === 0) $('qStatus').textContent = `#${job.number}: drawing in ${i / 10} s — press ✕ Skip to drop it`; await new Promise(r => setTimeout(r, 100)); } }
+    if (Q.cancelPreview) { Q.cancelPreview = false; await qSkipLoaded(); return; }
+    if (!Q.on) { $('qStatus').textContent = `#${job.number} is on the canvas — press 2 · Draw it.`; return; }
+    const ok = await qDrawLoaded();
+    if (ok && Q.on) { if ($('qPause').checked) { Q.waitingContinue = true; $('qStatus').textContent = `#${job.number} done ✓ — change the paper, then press Continue`; $('btnQContinue').style.display = ''; } else $('qStatus').textContent = `#${job.number} done ✓ — next one starts automatically`; }
   }
   function eventWidthMm() { const v = $('qSize').value; if (v === 'fit') return null; const inches = v === 'custom' ? num('qSizeCustom') : +v; return inches > 0 ? inches * IN : null; }
   function applyEventSize() { // size + place the (single) queued drawing per the event settings
@@ -1594,11 +1629,12 @@ window.DEXARM_PEN_OFFSET=114;
   }
   $('qSize').addEventListener('change', () => { $('qSizeCustomRow').style.display = $('qSize').value === 'custom' ? '' : 'none'; });
   $('qSizeCustomRow').style.display = $('qSize').value === 'custom' ? '' : 'none';
-  function syncQ() { try { localStorage.setItem('dexdraw.autoRun', Q.on ? '1' : '0'); } catch (_) { } $('btnQAuto').textContent = Q.on ? '■ Stop auto-run' : '▶ Auto-run queue'; $('btnQAuto').classList.toggle('danger', Q.on); $('btnQAuto').classList.toggle('primary', !Q.on); if (!Q.on) { Q.waitingContinue = false; $('btnQContinue').style.display = 'none'; } }
+  function syncQ() { try { localStorage.setItem('dexdraw.autoRun', Q.on ? '1' : '0'); } catch (_) { } $('btnQAuto').textContent = Q.on ? '■ Stop auto-run' : '▶ Auto-run queue'; $('btnQAuto').classList.toggle('danger', Q.on); if (!Q.on) { Q.waitingContinue = false; $('btnQContinue').style.display = 'none'; } }
   $('btnQAuto').addEventListener('click', () => { if (!link.connected) { log('connect the arm first', 'err'); return; } if (S.needsHome) { log('press ⌂ Home first (STOP was used)', 'err'); return; } Q.on = !Q.on; syncQ(); if (Q.on) { log('auto-run on: setup must be done (Home, pen height, paper center)'); qRefresh(); } });
-  $('btnQNext').addEventListener('click', () => { if (!link.connected) { log('connect the arm first', 'err'); return; } if (S.needsHome) { log('press ⌂ Home first (STOP was used)', 'err'); return; } qDrawNext(); });
+  $('btnQNext').addEventListener('click', () => { if (!link.connected) { log('connect the arm first', 'err'); return; } if (S.needsHome) { log('press ⌂ Home first (STOP was used)', 'err'); return; } qLoadNext(); });
+  $('btnQDraw').addEventListener('click', () => { if (!link.connected) { log('connect the arm first', 'err'); return; } if (S.needsHome) { log('press ⌂ Home first (STOP was used)', 'err'); return; } qDrawLoaded(); });
   $('btnQContinue').addEventListener('click', () => { Q.waitingContinue = false; $('btnQContinue').style.display = 'none'; qRefresh(); });
-  $('btnQSkipCur').addEventListener('click', () => { Q.cancelPreview = true; if (S.running) S.stopFlag = true; });
+  $('btnQSkipCur').addEventListener('click', () => { Q.cancelPreview = true; if (S.running) S.stopFlag = true; else if (Q.loaded) qSkipLoaded(); });
   // auto-run survives a page reload: it resumes as soon as the arm has reconnected
   Q.resume = localStorage.getItem('dexdraw.autoRun') === '1';
   syncQ(); qRefresh(); Q.timer = setInterval(qRefresh, 4000);
