@@ -179,7 +179,7 @@
         <div class="row"><label>Acceleration (travel)</label><input id="accT" type="number" value="1000" step="100"><span class="unit">mm/s²</span></div>
         <div class="row"><label>Jerk</label><input id="jerk" type="number" value="5" step="1"><span class="unit">mm/s</span></div>
         <div class="row"><label>Joint-space travel</label><input id="fastTravel" type="checkbox"></div>
-        <div class="row"><label>Commands in flight</label><input id="inflight" type="number" value="8" min="1" max="8" step="1"><span class="unit"></span></div>
+        <div class="row"><label>Commands in flight</label><input id="inflight" type="number" value="4" min="1" max="4" step="1"><span class="unit"></span></div>
         <div class="note">Firmware ceiling is 18,000 mm/min and 3,000 mm/s². Rotrics ships at 60 mm/s² — that's the main reason it feels slow.</div>
       </div>
     </section>
@@ -1024,6 +1024,20 @@ window.DEXARM_PEN_OFFSET=114;
         setTimeout(tick, 50);
       });
     }
+    /** wait for the outstanding acks — but if the arm goes quiet with acks still missing (an "ok" got lost), check that it
+     *  is alive and idle with M114 and carry on instead of hanging forever. */
+    async drain(pending, onStatus) {
+      while (pending.length) {
+        const quiet = this.settle(6000, 6500).then(() => 'quiet');
+        const r = await Promise.race([Promise.all(pending.slice()).then(() => 'done'), quiet]);
+        if (r === 'done') break;
+        if (!pending.length) break;
+        let alive = false; try { await this.query('M114', /X:/, 4000); alive = true; } catch (_) { }
+        if (!alive) throw new Error('the arm stopped answering');
+        const n = this.flush(); if (onStatus) onStatus(`${n} command(s) were never acknowledged — the arm is idle, so carrying on`);
+        break;
+      }
+    }
     /** forget every outstanding ack. Used after an emergency stop (M410's own "ok" would otherwise be credited to the
      *  next command, and from then on every send would be acked one early — the arm ends up running garbled lines). */
     flush() { const n = this._waiters.length; for (const w of this._waiters.splice(0)) w.reject(new Error('flushed')); return n; }
@@ -1044,10 +1058,12 @@ window.DEXARM_PEN_OFFSET=114;
      *  ctl: { inflight, onProgress(i,total), shouldPause(), shouldStop() } */
     async stream(gcode, ctl) {
       const lines = gcode.split('\n').map(l => l.replace(/;.*$/, '').trim()).filter(Boolean);
-      const inflight = Math.max(1, Math.min(8, ctl.inflight || 3));
+      // Marlin has only 4 command slots; more than 4 unacknowledged lines can overflow its serial buffer, which drops
+      // characters (garbled moves) and loses "ok"s (the stream then waits forever). 4 still keeps the planner fed.
+      const inflight = Math.max(1, Math.min(4, ctl.inflight || 3));
       let i = 0, done = 0; const pending = []; let penDown = false;
       const total = lines.length;
-      const quiesce = async () => { await Promise.all(pending.slice()); await this.send('M400'); }; // let the queued moves finish
+      const quiesce = async () => { await this.drain(pending, ctl.onStatus); await this.send('M400'); }; // let the queued moves finish
       const stopped = async () => { await quiesce(); if (penDown && ctl.penUp) await this.send(ctl.penUp); throw new Error('stopped'); };
       while (i < lines.length) {
         if (ctl.shouldStop && ctl.shouldStop()) await stopped();
@@ -1062,7 +1078,7 @@ window.DEXARM_PEN_OFFSET=114;
         pending.push(p);
         if (pending.length >= inflight) await Promise.race(pending);
       }
-      await Promise.all(pending);
+      await this.drain(pending, ctl.onStatus);
       return done;
     }
   }
@@ -1292,11 +1308,11 @@ window.DEXARM_PEN_OFFSET=114;
   const GROUPS = {
     speed: { fields: ['spDraw', 'spTravel', 'spZ', 'acc', 'accT', 'jerk', 'fastTravel', 'inflight', 'jogSpeed', 'jogStep', 'zLift', 'zSafe'],
       builtin: {
-        'Quality (default)': { spDraw: 3500, spTravel: 7000, spZ: 2000, acc: 400, accT: 1000, jerk: 5, fastTravel: false, inflight: 8, jogSpeed: 6000, jogStep: 10, zLift: 5, zSafe: 20 },
-        'Smooth': { spDraw: 6000, spTravel: 7000, spZ: 2000, acc: 600, accT: 1000, jerk: 8, fastTravel: false, inflight: 8, jogSpeed: 6000, jogStep: 10, zLift: 5, zSafe: 20 },
-        'Fast': { spDraw: 6000, spTravel: 12000, spZ: 4000, acc: 1200, accT: 2000, jerk: 8, fastTravel: false, inflight: 8, jogSpeed: 6000, zLift: 5 },
-        'Faster': { spDraw: 10000, spTravel: 15000, spZ: 5000, acc: 2000, accT: 3000, jerk: 10, fastTravel: false, inflight: 8, jogSpeed: 8000, zLift: 5 },
-        'Max': { spDraw: 18000, spTravel: 18000, spZ: 6000, acc: 3000, accT: 3000, jerk: 15, fastTravel: false, inflight: 8, jogSpeed: 8000, zLift: 4 },
+        'Quality (default)': { spDraw: 3500, spTravel: 7000, spZ: 2000, acc: 400, accT: 1000, jerk: 5, fastTravel: false, inflight: 4, jogSpeed: 6000, jogStep: 10, zLift: 5, zSafe: 20 },
+        'Smooth': { spDraw: 6000, spTravel: 7000, spZ: 2000, acc: 600, accT: 1000, jerk: 8, fastTravel: false, inflight: 4, jogSpeed: 6000, jogStep: 10, zLift: 5, zSafe: 20 },
+        'Fast': { spDraw: 6000, spTravel: 12000, spZ: 4000, acc: 1200, accT: 2000, jerk: 8, fastTravel: false, inflight: 4, jogSpeed: 6000, zLift: 5 },
+        'Faster': { spDraw: 10000, spTravel: 15000, spZ: 5000, acc: 2000, accT: 3000, jerk: 10, fastTravel: false, inflight: 4, jogSpeed: 8000, zLift: 5 },
+        'Max': { spDraw: 18000, spTravel: 18000, spZ: 6000, acc: 3000, accT: 3000, jerk: 15, fastTravel: false, inflight: 4, jogSpeed: 8000, zLift: 4 },
         'Rotrics Studio stock': { spDraw: 2000, spTravel: 4000, spZ: 1500, acc: 60, accT: 60, jerk: 10, fastTravel: false, inflight: 3, jogSpeed: 4000, zLift: 10 }
       }, after: () => { S.gcode = ''; updateButtons(); draw(); } },
     conv: { fields: ['imgMode', 'imgThr', 'imgInv', 'imgRes', 'imgSpeck', 'imgSmooth', 'imgPrune', 'imgBlur', 'optOrder', 'optJoin', 'optSeg', 'optTurn', 'optSimp', 'optMin', 'optMinDetail', 'optSimpDetail'],
@@ -1405,7 +1421,7 @@ window.DEXARM_PEN_OFFSET=114;
     const t0 = performance.now(); let ok = false; const o = gcodeOpts();
     try {
       const done = await link.stream(S.gcode, {
-        inflight: num('inflight'), shouldPause: () => S.paused, shouldStop: () => S.stopFlag, penUp: `G0 Z${o.penUpZ} F${o.zSpeed}`, penDown: `G1 Z${o.penDownZ} F${o.zSpeed}`,
+        inflight: num('inflight'), shouldPause: () => S.paused, shouldStop: () => S.stopFlag, onStatus: m => log('⚠ ' + m, 'err'), penUp: `G0 Z${o.penUpZ} F${o.zSpeed}`, penDown: `G1 Z${o.penDownZ} F${o.zSpeed}`,
         onProgress: (i, n) => { $('prog').firstElementChild.style.width = (100 * i / n) + '%'; $('progTxt').textContent = `${i} / ${n} lines · ${((performance.now() - t0) / 1000).toFixed(0)} s`; }
       });
       log(`done: ${done} lines in ${((performance.now() - t0) / 1000).toFixed(1)} s`); ok = true;
@@ -1648,7 +1664,7 @@ window.DEXARM_PEN_OFFSET=114;
     accT: 'Ramp rate for pen-up travel moves. Can be higher than draw acceleration since nothing is being drawn.',
     jerk: 'Instant speed change allowed at corners (mm/s). Lower = smoother, rounder motion through corners; higher = snappier but can rattle. 5–10 for smooth lines.',
     fastTravel: 'Lets the arm swing its joints directly between lines instead of moving the pen in a straight line. Faster travel, but the lifted pen takes a curved path — keep clearance in mind.',
-    inflight: 'How many G-code lines are sent ahead before waiting for the arm to confirm. Higher keeps the motion buffer full on dense drawings (fewer stutters). 6–8 recommended; 1 mimics Rotrics Studio.',
+    inflight: 'How many G-code lines are sent ahead before waiting for the arm to confirm. 4 keeps the motion buffer full without overflowing the arm\'s serial buffer (more than 4 can garble moves). 1 mimics Rotrics Studio and stutters.',
     jogSpeed: 'Speed of the jog buttons (mm/min). Lower for fine positioning near the paper.',
     jogStep: 'Distance each jog click moves the arm. Use 10 to get close, 1 and 0.5 to find the exact pen height.',
     zDown: 'The Z height where the pen tip touches the paper. Set it with "SET pen-down = here". Lower (more negative) presses harder.',
