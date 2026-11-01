@@ -26,12 +26,14 @@
   .screen.on{display:flex}
   h1{font-size:30px;margin:0 0 6px;letter-spacing:-.3px}
   .sub{color:var(--mut);margin:0 0 20px;font-size:18px}
-  .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:18px}
+  .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:18px} /* 4 across in portrait; the page scrolls as the gallery grows */
+  @media (orientation:landscape){.tiles{grid-template-columns:repeat(6,1fr)}}
+  @media (max-width:600px){.tiles{grid-template-columns:repeat(2,1fr)}}
   .tile{background:var(--card);border:2px solid var(--line);border-radius:16px;overflow:hidden;cursor:pointer;text-align:center;transition:transform .08s;display:flex;flex-direction:column}
   .tile:active{border-color:var(--blue)}
   .tile:active{transform:scale(.97)}
-  .tile img{width:100%;aspect-ratio:1;object-fit:contain;display:block;background:#fff;padding:6px}
-  .tile .ph{width:100%;aspect-ratio:1;display:flex;align-items:center;justify-content:center;background:#e9eef7;color:var(--mut);font-size:48px}
+  .tile img{width:100%;aspect-ratio:4/5;object-fit:contain;display:block;background:#fff;padding:4px} /* portrait box so upright line art fills the tile */
+  .tile .ph{width:100%;aspect-ratio:4/5;display:flex;align-items:center;justify-content:center;background:#e9eef7;color:var(--mut);font-size:48px}
   .tile .nm{padding:12px;font-weight:700;font-size:19px;background:var(--blue);color:#fff;letter-spacing:.3px}
   .choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin:10px 0 26px}
   .choice{background:#fff;border:2px solid var(--line);border-radius:16px;padding:26px 14px;font-size:22px;font-weight:700;text-align:center;cursor:pointer}
