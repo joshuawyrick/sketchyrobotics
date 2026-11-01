@@ -55,6 +55,10 @@
   .pair{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px 16px;margin-bottom:14px}
   .pair h3{margin:0 0 10px;font-size:16px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
   .pair .choices{margin:0}
+  .names{display:flex;flex-direction:column;gap:16px;margin:6px 0 20px;max-width:620px}
+  .nameField{display:flex;flex-direction:column;gap:6px;font-size:18px;font-weight:600}
+  .nameField input{font:600 30px system-ui;padding:16px 18px;border:2px solid var(--line);border-radius:14px;background:#fff;color:var(--ink)}
+  .nameField input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 4px rgba(0,109,246,.18)}
   .bar{display:flex;gap:12px;margin-top:auto;padding-top:18px}
   .btn{flex:1;border:0;border-radius:14px;padding:18px;font:700 20px system-ui;cursor:pointer;background:#fff;color:var(--ink);border:2px solid var(--line)}
   .btn.primary{background:var(--blue);color:#fff;border-color:var(--blue)}
@@ -126,6 +130,13 @@
     <div id="genders"></div>
     <div class="bar"><button class="btn" id="backWho">Back</button><button class="btn primary" id="nextWho" disabled>Next: take photo</button></div>
   </section>
+  <!-- 2b names -->
+  <section class="screen" id="s-names">
+    <div class="crumb" id="crumb1b"></div>
+    <h1>Whose portrait is this?</h1><p class="sub">The robot letters the name above the drawing. Leave blank to skip.</p>
+    <div class="names" id="nameFields"></div>
+    <div class="bar"><button class="btn" id="backNames">Back</button><button class="btn" id="skipNames">Skip</button><button class="btn primary" id="nextNames">Next — take the photo</button></div>
+  </section>
   <!-- 3 camera -->
   <section class="screen" id="s-cam">
     <div class="crumb" id="crumb2"></div>
@@ -150,7 +161,7 @@
 <script>
 (() => {
   const $ = id => document.getElementById(id);
-  const screens = ['s-theme', 's-who', 's-cam', 's-status'];
+  const screens = ['s-theme', 's-who', 's-names', 's-cam', 's-status'];
   const show = id => { for (const s of screens) $(s).classList.toggle('on', s === id); document.querySelector('main').classList.toggle('cam-mode', id === 's-cam'); setTimeout(() => { if (typeof bump === 'function') bump(); }, 0); };
   const S = { themes: [], theme: null, who: null, g: {}, blob: null, job: null, stream: null };
   const LABEL = { male: 'Male', female: 'Female' };
@@ -191,7 +202,22 @@
     if (k && !ok) { const w = document.createElement('p'); w.className = 'err'; w.textContent = 'That combination isn\'t available for this style yet.'; g.appendChild(w); }
   }
   $('backWho').onclick = () => show('s-theme');
-  $('nextWho').onclick = () => { $('crumb2').textContent = `${S.theme.name} · ${variantLabel()}`; openCam(); show('s-cam'); };
+  // names: one field per person (left/right for pairs) + the pet's name; all optional
+  function renderNames() {
+    const k = variantKey(); const f = []; S.names = S.names || {};
+    if (k.startsWith('1-')) f.push(['a', 'Your name']);
+    else if (k.startsWith('2-')) { f.push(['a', 'Name of the person on the LEFT']); f.push(['b', 'Name of the person on the RIGHT']); }
+    else if (k.startsWith('pet-')) { f.push(['a', 'Your name']); f.push(['pet', "Your pet's name"]); }
+    $('crumb1b').textContent = `${S.theme.name} · ${variantLabel()}`;
+    $('nameFields').innerHTML = f.map(([key, label]) => `<label class="nameField"><span>${label}</span><input type="text" data-k="${key}" maxlength="24" autocomplete="off" autocapitalize="words" placeholder="optional" value="${(S.names[key] || '').replace(/"/g, '&quot;')}"></label>`).join('');
+    $('nameFields').querySelectorAll('input').forEach(i => { i.oninput = () => { S.names[i.dataset.k] = i.value; bump(); }; i.onkeydown = e => { if (e.key === 'Enter') { const n = i.closest('label').nextElementSibling; if (n) n.querySelector('input').focus(); else $('nextNames').click(); } }; });
+    setTimeout(() => { const first = $('nameFields').querySelector('input'); if (first) first.focus(); }, 150);
+  }
+  const toCam = () => { $('crumb2').textContent = `${S.theme.name} · ${variantLabel()}`; openCam(); show('s-cam'); };
+  $('nextWho').onclick = () => { renderNames(); show('s-names'); };
+  $('backNames').onclick = () => show('s-who');
+  $('skipNames').onclick = () => { S.names = {}; toCam(); };
+  $('nextNames').onclick = () => { document.activeElement && document.activeElement.blur(); toCam(); };
   function variantLabel() { const k = variantKey(); return ({ '1-male': 'one male', '1-female': 'one female', '2-male-male': 'two males', '2-female-female': 'two females', '2-male-female': 'male + female', '2-female-male': 'female + male', 'pet-male': 'male + pet', 'pet-female': 'female + pet' })[k] || k; }
 
   const COUNTDOWN = 3;
@@ -260,7 +286,7 @@
   const _origShow = show; // keep idle timer in sync with screen changes
   $('send').onclick = async () => {
     $('send').disabled = true; $('send').textContent = 'Sending…';
-    const fd = new FormData(); fd.append('photo', S.blob, 'photo.jpg'); fd.append('theme', S.theme.slug); fd.append('variant', variantKey());
+    const fd = new FormData(); fd.append('photo', S.blob, 'photo.jpg'); fd.append('theme', S.theme.slug); fd.append('variant', variantKey()); for (const [k, f] of [['a', 'name1'], ['b', 'name2'], ['pet', 'petName']]) if (S.names && S.names[k]) fd.append(f, S.names[k]);
     try {
       const r = await fetch('/api/jobs', { method: 'POST', body: fd }); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status);
       S.job = j; S.cdTimer = null; S.cdText = ''; closeCam(); show('s-status'); poll();
@@ -278,7 +304,7 @@
     if (r.status !== 'done') S.pollTimer = setTimeout(poll, 4000);
   }
   const RESET_AFTER_ART = 20, IDLE_RESET = 90; // seconds
-  function goHome() { clearTimeout(S.pollTimer); clearInterval(S.cdTimer); S.cdTimer = null; S.cdText = ''; closeCam(); S.theme = null; S.job = null; S.who = null; S.g = {}; loadThemes(); show('s-theme'); }
+  function goHome() { clearTimeout(S.pollTimer); clearInterval(S.cdTimer); S.cdTimer = null; S.cdText = ''; closeCam(); S.theme = null; S.job = null; S.who = null; S.g = {}; S.names = {}; loadThemes(); show('s-theme'); }
   function startCountdown(secs) {
     clearInterval(S.cdTimer); let left = secs; const tick = () => { S.cdText = `Next person in ${left} s — tap to stay`; const el = $('cd'); if (el) el.textContent = S.cdText; if (left-- <= 0) goHome(); };
     tick(); S.cdTimer = setInterval(tick, 1000);

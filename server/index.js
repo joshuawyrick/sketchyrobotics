@@ -93,7 +93,8 @@ function loadState() {
   seq = Math.max(0, ...[...jobs.values()].map(j => j.number || 0));
 }
 function saveJob(j) { fs.mkdirSync(path.join(JOBS, j.id), { recursive: true }); const f = path.join(JOBS, j.id, 'job.json'); fs.writeFileSync(f, JSON.stringify(j, null, 2)); jobs.set(j.id, j); if (!j.test || j.lab) persist(f); }
-function publicJob(j) { const { id, number, status, theme, themeName, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset } = j; return { id, number, status, theme, themeName, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset }; }
+function publicJob(j) { const { id, number, status, theme, themeName, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset, names } = j; return { id, number, status, theme, themeName, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset, names }; }
+const cleanName = v => String(v || '').replace(/[^\p{L}\p{N} .,'&-]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 24); // letters the plotter font has
 function sortedJobs() { return [...jobs.values()].sort((a, b) => (a.priority || 0) - (b.priority || 0) || a.createdAt - b.createdAt); }
 function queuePosition(id) { let n = 0; for (const j of sortedJobs()) { if (['pending', 'processing', 'ready', 'drawing'].includes(j.status)) { n++; if (j.id === id) return n; } } return null; }
 
@@ -200,7 +201,8 @@ app.post('/api/jobs', upload.single('photo'), async (req, res) => {
     if (!theme.prompts[variant].trim()) return res.status(400).json({ error: 'That option is not set up yet for this theme' });
     if (!req.file) return res.status(400).json({ error: 'no photo' });
     const id = crypto.randomBytes(6).toString('hex');
-    const job = { id, number: ++seq, status: 'pending', theme: theme.slug, themeName: theme.name, variant, createdAt: Date.now(), attempts: 0, guestName: String(req.body.name || '').slice(0, 60), priority: 0 };
+    const names = { a: cleanName(req.body.name1), b: cleanName(req.body.name2), pet: cleanName(req.body.petName) }; if (!names.a && !names.b && !names.pet) delete names.a;
+    const job = { id, number: ++seq, status: 'pending', theme: theme.slug, themeName: theme.name, variant, createdAt: Date.now(), attempts: 0, guestName: String(req.body.name || '').slice(0, 60), names: (names.a || names.b || names.pet) ? names : null, priority: 0 };
     fs.mkdirSync(path.join(JOBS, id), { recursive: true });
     // EXIF-rotate, limit size, save as jpg
     await sharp(req.file.buffer).rotate().resize(1536, 1536, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 92 }).toFile(path.join(JOBS, id, 'photo.jpg'));

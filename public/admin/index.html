@@ -152,7 +152,7 @@
       <td><b>#${j.number}</b></td>
       <td><img src="/api/jobs/${j.id}/photo?token=${encodeURIComponent(TOKEN)}" onerror="this.style.display='none'"></td>
       <td>${['ready', 'drawing', 'done', 'skipped', 'archived'].includes(j.status) ? `<a href="/api/jobs/${j.id}/art" target="_blank"><img src="/api/jobs/${j.id}/art?thumb=1"></a>` : ''}</td>
-      <td>${j.themeName}<br><span class="note">${STATE.variants[j.variant] || j.variant}</span></td>
+      <td>${j.themeName}<br><span class="note">${STATE.variants[j.variant] || j.variant}</span>${j.names ? `<br><b>${[j.names.a, j.names.b, j.names.pet].filter(Boolean).join(' & ')}</b>` : ''}</td>
       <td><span class="pill ${j.status}">${j.status}</span>${j.error ? `<br><span class="bad note">${j.error}</span>` : ''}</td>
       <td class="note">${fmt(j.createdAt)}</td>
       <td class="note" style="white-space:nowrap">${j.drawSeconds ? `<b>${fmtS(j.drawSeconds)}</b><br>${j.widthMm ? (j.widthMm / 25.4).toFixed(1) + ' in · ' : ''}${j.strokes || ''} strokes${j.preset ? '<br>' + j.preset : ''}` : ''}</td>

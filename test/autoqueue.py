@@ -19,6 +19,8 @@ async def main():
             await s.wait_for_timeout(300)
             if await s.is_visible('#btnQDraw'): break
         print('after Load: card =', await s.text_content('#qCurName'), '|', await s.text_content('#qCurNote'), '| status:', (await s.text_content('#qStatus'))[:60])
+        print('file info:', await s.text_content('#fileInfo'), '| log has lettering:', 'name lettering' in (await s.text_content('#console')))
+        await s.screenshot(path='test/names-canvas.png', clip={'x':0,'y':60,'width':1100,'height':840})
         await s.click('#btnQDraw')
         for i in range(120):
             await s.wait_for_timeout(500)
