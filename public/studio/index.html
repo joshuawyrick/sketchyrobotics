@@ -1670,12 +1670,23 @@ window.DEXARM_PEN_OFFSET=114;
       const ta = txt.w / txt.h; txt.h = num('qNameH'); txt.w = txt.h * ta; if (txt.w > o.w) { txt.w = o.w; txt.h = txt.w / ta; }
       const total = o.h + gap + txt.h; if (total > P.h) { const k = (P.h - gap - txt.h) / o.h; o.h *= k; o.w *= k; }
     }
-    const place = $('qPlace').value, pos = $('qNamePos').value; const groupH = o.h + (txt ? gap + txt.h : 0);
-    const top = place === 'top' ? P.maxY : place === 'bottom' ? P.minY + groupH : (P.minY + P.maxY) / 2 + groupH / 2; // top edge of the group
+    let place = $('qPlace').value; const pos = $('qNamePos').value; let slide = 0; // slide: mm the group is pushed down from a 'top' placement to get within reach
     o.x = (P.minX + P.maxX) / 2;
-    const layout = () => { if (!txt) { o.y = top - o.h / 2; return; } txt.x = o.x; if (pos === 'above') { txt.y = top - txt.h / 2; o.y = top - txt.h - gap - o.h / 2; } else { o.y = top - o.h / 2; txt.y = top - o.h - gap - txt.h / 2; } };
+    const layout = () => { // anchor: centre for Centered (so shrinking stays centred), bottom edge for Bottom, top edge (minus slide) for Top
+      const groupH = o.h + (txt ? gap + txt.h : 0);
+      const top = place === 'top' ? P.maxY - slide : place === 'bottom' ? P.minY + groupH : (P.minY + P.maxY) / 2 + groupH / 2;
+      if (!txt) { o.y = top - o.h / 2; return; } txt.x = o.x; if (pos === 'above') { txt.y = top - txt.h / 2; o.y = top - txt.h - gap - o.h / 2; } else { o.y = top - o.h / 2; txt.y = top - o.h - gap - txt.h / 2; } };
     layout();
-    for (let i = 0; i < 60 && !(boxInReach(o) && (!txt || boxInReach(txt))); i++) { o.w *= 0.96; o.h *= 0.96; if (txt) { txt.w *= 0.96; txt.h *= 0.96; } layout(); }
+    const ok = () => boxInReach(o) && (!txt || boxInReach(txt));
+    for (let i = 0; i < 80 && !ok(); i++) { // Top placement: first slide the group down toward the arm; otherwise (or once it can't slide) shrink a little
+      const groupH = o.h + (txt ? gap + txt.h : 0);
+      if (place === 'top' && P.maxY - slide - groupH > P.minY + 2) slide += 5; else { o.w *= 0.96; o.h *= 0.96; if (txt) { txt.w *= 0.96; txt.h *= 0.96; } }
+      layout();
+    }
+    if (!ok()) { // last resort: centre the group and shrink about the centre (always converges, as the pre-names code did)
+      place = 'center'; slide = 0; layout(); for (let i = 0; i < 60 && !ok(); i++) { o.w *= 0.96; o.h *= 0.96; if (txt) { txt.w *= 0.96; txt.h *= 0.96; } layout(); }
+      log('placement moved to centred so the arm can reach it', 'err');
+    }
     constrain(o); if (txt) constrain(txt); refresh();
   }
   for (const id of ['qNames', 'qNamePos', 'qNameFont', 'qNameH']) $(id).addEventListener('change', () => { const t = S.objects.find(x => x.kind === 'text'); if (!t) return; if (!$('qNames').checked) { deleteObj(t); return; } if (id === 'qNameFont') { const n = textObject(t.text, $('qNameFont').value, num('qNameH')); S.objects[S.objects.indexOf(t)] = n; } applyEventSize(); });
