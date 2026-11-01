@@ -771,7 +771,7 @@ window.DEXARM_PEN_OFFSET=114;
       if (last || turn > maxTurn || runLen >= seg) { out.push(b); lastDir = dir; runLen = 0; }
     }
     // merge stubs: any kept point closer than minSeg to its neighbour is dropped (endpoints stay)
-    const minSeg = Math.min(0.6, seg / 4); const m = [out[0]];
+    const minSeg = Math.min(0.6, seg / 2); const m = [out[0]];
     for (let i = 1; i < out.length - 1; i++) if (dist(out[i], m[m.length - 1]) >= minSeg) m.push(out[i]);
     const endp = out[out.length - 1]; if (dist(endp, m[m.length - 1]) < minSeg && m.length > 1) m[m.length - 1] = endp; else m.push(endp);
     return m;
@@ -1327,6 +1327,7 @@ window.DEXARM_PEN_OFFSET=114;
     speed: { fields: ['spDraw', 'spTravel', 'spZ', 'acc', 'accT', 'jerk', 'fastTravel', 'inflight', 'jogSpeed', 'jogStep', 'zLift', 'zSafe'],
       builtin: {
         'Quality (default)': { spDraw: 3500, spTravel: 7000, spZ: 2000, acc: 400, accT: 1000, jerk: 5, fastTravel: false, inflight: 4, jogSpeed: 6000, jogStep: 10, zLift: 5, zSafe: 20 },
+        'Ultra (slow, most precise)': { spDraw: 2500, spTravel: 7000, spZ: 1500, acc: 300, accT: 1000, jerk: 4, fastTravel: false, inflight: 4, jogSpeed: 6000, jogStep: 10, zLift: 5, zSafe: 20 },
         'Smooth': { spDraw: 6000, spTravel: 7000, spZ: 2000, acc: 600, accT: 1000, jerk: 8, fastTravel: false, inflight: 4, jogSpeed: 6000, jogStep: 10, zLift: 5, zSafe: 20 },
         'Fast': { spDraw: 6000, spTravel: 12000, spZ: 4000, acc: 1200, accT: 2000, jerk: 8, fastTravel: false, inflight: 4, jogSpeed: 6000, zLift: 5 },
         'Faster': { spDraw: 10000, spTravel: 15000, spZ: 5000, acc: 2000, accT: 3000, jerk: 10, fastTravel: false, inflight: 4, jogSpeed: 8000, zLift: 5 },
@@ -1336,6 +1337,7 @@ window.DEXARM_PEN_OFFSET=114;
     conv: { fields: ['imgMode', 'imgThr', 'imgInv', 'imgRes', 'imgSpeck', 'imgSmooth', 'imgPrune', 'imgBlur', 'optOrder', 'optJoin', 'optSeg', 'optTurn', 'optSimp', 'optMin', 'optMinDetail', 'optSimpDetail'],
       builtin: {
         'AI line art — full figure (default)': { imgMode: 'ink', imgThr: 187, imgInv: false, imgRes: 2800, imgSpeck: 11, imgSmooth: 5, imgPrune: 4, imgBlur: false, optOrder: true, optJoin: 0.6, optSeg: 2, optTurn: 6, optSimp: 0.12, optMin: 1.5, optMinDetail: 1, optSimpDetail: 0.08 },
+        'AI line art — ultra detail (slow)': { imgMode: 'ink', imgThr: 187, imgInv: false, imgRes: 2800, imgSpeck: 9, imgSmooth: 5, imgPrune: 3, imgBlur: false, optOrder: true, optJoin: 0.6, optSeg: 1.5, optTurn: 5, optSimp: 0.1, optMin: 1.0, optMinDetail: 0.8, optSimpDetail: 0.06 },
         'Line art portrait — drop hair wisps': { imgMode: 'ink', imgThr: 187, imgInv: false, imgRes: 2800, imgSpeck: 11, imgSmooth: 6, imgPrune: 4, imgBlur: false, optOrder: true, optJoin: 0.6, optSeg: 2.5, optTurn: 5, optSimp: 0.25, optMin: 8, optMinDetail: 1, optSimpDetail: 0.06 },
         'Line art — keep everything': { imgMode: 'ink', imgThr: 200, imgInv: false, imgRes: 1600, imgSpeck: 4, imgSmooth: 2, imgPrune: 16, imgBlur: false, optOrder: true, optJoin: 0.6, optSeg: 2, optTurn: 4, optSimp: 0.08, optMin: 1.5, optMinDetail: 1, optSimpDetail: 0.06 },
         'Logo / bold shapes': { imgMode: 'ink', imgThr: 160, imgInv: false, imgRes: 1600, imgSpeck: 20, imgSmooth: 3, imgPrune: 20, imgBlur: false, optOrder: true, optJoin: 1, optSeg: 3, optTurn: 6, optSimp: 0.15, optMin: 3, optMinDetail: 1, optSimpDetail: 0.08 },
