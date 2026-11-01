@@ -40,10 +40,10 @@ async function restoreFromBucket() {
   if (!r.ok) { console.log('storage: bucket unreachable, local disk only:', r.error && r.error.message, BUCKET_ID ? '' : '— set Secret OBJECT_STORAGE_BUCKET to your App Storage bucket name (e.g. repl-default-bucket-...)'); bucket = null; return; }
   // The bucket is the source of truth. The published app's disk starts as a stale snapshot of the workspace (and is wiped on every
   // redeploy anyway), so in deployment we throw the snapshot away and rebuild from the bucket: small files now, photos/art on demand.
-  if (IS_DEPLOYMENT) { for (const d of [THEMES, JOBS]) fs.rmSync(d, { recursive: true, force: true }); fs.rmSync(SETTINGS_FILE, { force: true }); for (const d of [THEMES, JOBS]) fs.mkdirSync(d, { recursive: true }); }
+  if (IS_DEPLOYMENT) { for (const d of [THEMES, JOBS]) fs.rmSync(d, { recursive: true, force: true }); fs.rmSync(SETTINGS_FILE, { force: true }); fs.rmSync(path.join(DATA, 'lab-refs.json'), { force: true }); for (const d of [THEMES, JOBS]) fs.mkdirSync(d, { recursive: true }); }
   let n = 0;
   for (const o of r.value) {
-    if (!o.name || o.name.endsWith('/') || !/^(themes|jobs)\/|^settings\.json$/.test(o.name)) continue; // skip folders and anything that isn't ours
+    if (!o.name || o.name.endsWith('/') || !/^(themes|jobs)\/|^(settings|lab-refs)\.json$/.test(o.name)) continue; // skip folders and anything that isn't ours
     const dest = path.join(DATA, o.name);
     if (IS_DEPLOYMENT && /\/(photo\.jpg|art\.png|art-thumb\.png)$/.test(o.name)) continue; // big files: fetched when first requested
     if (await download(o.name, dest)) n++;
@@ -249,10 +249,10 @@ app.post('/api/admin/lab', adminAuth, upload.single('photo'), async (req, res) =
     let photo; if (req.file) photo = await sharp(req.file.buffer).rotate().resize(1536, 1536, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 92 }).toBuffer();
     else if (req.body.refJob && jobs.has(req.body.refJob)) { const f = path.join(JOBS, req.body.refJob, 'photo.jpg'); if (await ensureLocal(f)) photo = fs.readFileSync(f); }
     if (!photo) return res.status(400).json({ error: 'add a reference photo' });
-    const batch = 'lab-' + Date.now().toString(36);
+    const batch = 'lab-' + Date.now().toString(36); const photoHash = crypto.createHash('sha1').update(photo).digest('hex').slice(0, 16);
     const runs = models.map(async model => {
       const id = 'lab-' + crypto.randomBytes(4).toString('hex');
-      const job = { id, number: 0, status: 'processing', theme: theme.slug, themeName: theme.name, variant, createdAt: Date.now(), attempts: 1, test: true, lab: true, batch, labPrompt: prompt, labModel: model };
+      const job = { id, number: 0, status: 'processing', theme: theme.slug, themeName: theme.name, variant, createdAt: Date.now(), attempts: 1, test: true, lab: true, batch, photoHash, labPrompt: prompt, labModel: model };
       fs.mkdirSync(path.join(JOBS, id), { recursive: true }); fs.writeFileSync(path.join(JOBS, id, 'photo.jpg'), photo); if (true) persist(path.join(JOBS, id, 'photo.jpg'));
       jobs.set(id, job); const t0 = Date.now();
       const override = { model, prompt }; for (const k of ['quality', 'moderation']) if (req.body[k]) override[k] = String(req.body[k]);
@@ -262,8 +262,11 @@ app.post('/api/admin/lab', adminAuth, upload.single('photo'), async (req, res) =
     res.json({ batch, results: await Promise.all(runs) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-function labJob(j) { return { id: j.id, batch: j.batch, theme: j.theme, themeName: j.themeName, variant: j.variant, createdAt: j.createdAt, status: j.status, error: j.error, seconds: j.seconds, prompt: j.labPrompt, model: j.labModel, used: j.used, droppedParam: j.droppedParam, art: j.status === 'test' ? `/api/jobs/${j.id}/art` : null, photo: `/api/jobs/${j.id}/photo`, applied: j.applied || null }; }
-app.get('/api/admin/lab', adminAuth, (req, res) => res.json({ results: [...jobs.values()].filter(j => j.lab).sort((a, b) => b.createdAt - a.createdAt).slice(0, 80).map(labJob) }));
+function labJob(j) { return { id: j.id, batch: j.batch, photoHash: j.photoHash || j.batch, theme: j.theme, themeName: j.themeName, variant: j.variant, createdAt: j.createdAt, status: j.status, error: j.error, seconds: j.seconds, prompt: j.labPrompt, model: j.labModel, used: j.used, droppedParam: j.droppedParam, art: j.status === 'test' ? `/api/jobs/${j.id}/art` : null, photo: `/api/jobs/${j.id}/photo`, applied: j.applied || null }; }
+const LAB_REFS = path.join(DATA, 'lab-refs.json'); // { hidden: [photoHash] } — reference photos removed from the Lab's strip (results keep their photo)
+const labRefs = () => { try { return JSON.parse(fs.readFileSync(LAB_REFS, 'utf8')); } catch (_) { return { hidden: [] }; } };
+app.get('/api/admin/lab', adminAuth, (req, res) => res.json({ results: [...jobs.values()].filter(j => j.lab).sort((a, b) => b.createdAt - a.createdAt).slice(0, 80).map(labJob), hiddenRefs: labRefs().hidden }));
+app.post('/api/admin/lab/refs/hide', adminAuth, (req, res) => { const r = labRefs(); const h = String(req.body.hash || ''); if (h && !r.hidden.includes(h)) r.hidden.push(h); fs.writeFileSync(LAB_REFS, JSON.stringify(r)); persist(LAB_REFS); res.json({ ok: true }); });
 app.post('/api/admin/lab/:id/apply', adminAuth, (req, res) => { // make this result the master prompt + model for a theme/combination
   const j = jobs.get(req.params.id); if (!j || !j.lab) return res.status(404).end();
   const theme = readTheme(slugify(req.body.theme || j.theme)); const variant = String(req.body.variant || j.variant); if (!theme || !VARIANTS.includes(variant)) return res.status(400).json({ error: 'bad target' });

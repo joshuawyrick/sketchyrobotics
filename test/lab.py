@@ -27,7 +27,8 @@ async def main():
         print('applied card marked:', len(await pg.query_selector_all('#labOut .lab.applied')))
         # history + ref reuse
         await pg.reload(); await pg.wait_for_timeout(1500); await pg.click('#nav [data-t=test]'); await pg.wait_for_timeout(500); await pg.select_option('#tTheme', t['slug']); await pg.wait_for_timeout(300)
-        print('history cards:', len(await pg.query_selector_all('#labHist .lab')), '| ref photos:', len(await pg.query_selector_all('#refStrip img')))
+        print('history cards:', len(await pg.query_selector_all('#labHist .lab')), '| ref photos (same face twice → 1):', len(await pg.query_selector_all('#refStrip .ref')))
+        await pg.click('#refStrip .ref .x'); await pg.wait_for_timeout(500); await pg.reload(); await pg.wait_for_timeout(1500); await pg.click('#nav [data-t=test]'); await pg.wait_for_timeout(500); print('refs after remove+reload:', len(await pg.query_selector_all('#refStrip .ref')), '| results kept:', len(json.load(urllib.request.urlopen(urllib.request.Request(B+'/api/admin/lab', headers={'x-admin-token':'pw'})))['results']))
         # used params recorded
         lab = json.load(urllib.request.urlopen(urllib.request.Request(B+'/api/admin/lab', headers={'x-admin-token':'pw'})))['results']; print('used:', lab[0]['used'])
         # theme editor shows per-box model
