@@ -77,7 +77,7 @@ function readTheme(slug) {
 function listThemes() { return fs.readdirSync(THEMES).map(readTheme).filter(Boolean).sort((a, b) => (a.order || 0) - (b.order || 0) || a.name.localeCompare(b.name)); }
 function writeTheme(slug, t) {
   const dir = path.join(THEMES, slug); fs.mkdirSync(path.join(dir, 'prompts'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'theme.json'), JSON.stringify({ name: t.name, enabled: t.enabled !== false, order: t.order || 0 }, null, 2)); persist(path.join(dir, 'theme.json'));
+  fs.writeFileSync(path.join(dir, 'theme.json'), JSON.stringify({ name: t.name, enabled: t.enabled !== false, order: t.order || 0, model: t.model || '', quality: t.quality || '' }, null, 2)); persist(path.join(dir, 'theme.json')); // model/quality: blank = use Settings
   if (t.prompts) for (const v of VARIANTS) if (v in t.prompts) { const f = path.join(dir, 'prompts', v + '.txt'); fs.writeFileSync(f, String(t.prompts[v] || '')); persist(f); }
 }
 
@@ -98,8 +98,9 @@ function queuePosition(id) { let n = 0; for (const j of sortedJobs()) { if (['pe
 
 // ---------- OpenAI ----------
 async function generateArt(job, override) {
-  const s = Object.assign(getSettings(), override || {});
   const theme = readTheme(job.theme); if (!theme) throw new Error('theme missing');
+  const themeOv = {}; if (theme.model) themeOv.model = theme.model; if (theme.quality) themeOv.quality = theme.quality; // per-theme model beats Settings; a test's own pick beats both
+  const s = Object.assign(getSettings(), themeOv, override || {});
   const prompt = (theme.prompts[job.variant] || '').trim(); if (!prompt) throw new Error(`no prompt saved for ${theme.name} / ${VARIANT_LABELS[job.variant]}`);
   if (!OPENAI_KEY) throw new Error('OPENAI_API_KEY is not set in Secrets');
   const photoFile = path.join(JOBS, job.id, 'photo.jpg'); if (!(await ensureLocal(photoFile))) throw new Error('photo missing'); const photo = fs.readFileSync(photoFile);
@@ -205,7 +206,8 @@ app.post('/api/admin/test', adminAuth, upload.single('photo'), async (req, res) 
     await sharp(req.file.buffer).rotate().resize(1536, 1536, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 92 }).toFile(path.join(JOBS, id, 'photo.jpg'));
     const override = {}; for (const k of ['model', 'quality', 'size', 'inputFidelity']) if (req.body[k]) override[k] = String(req.body[k]);
     jobs.set(id, job); const t0 = Date.now(); await generateArt(job, override); job.status = 'test'; job.override = override; saveJob(job);
-    res.json({ id, art: `/api/jobs/${id}/art`, used: Object.assign({ model: getSettings().model, quality: getSettings().quality, size: getSettings().size, inputFidelity: getSettings().inputFidelity }, override), seconds: Math.round((Date.now() - t0) / 1000) });
+    const th = readTheme(job.theme) || {}; const thOv = {}; if (th.model) thOv.model = th.model; if (th.quality) thOv.quality = th.quality;
+    res.json({ id, art: `/api/jobs/${id}/art`, used: Object.assign({ model: getSettings().model, quality: getSettings().quality, size: getSettings().size, inputFidelity: getSettings().inputFidelity }, thOv, override), seconds: Math.round((Date.now() - t0) / 1000) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/admin/jobs/:id', adminAuth, (req, res) => { // actions: retry, front, skip, requeue (draw again)
