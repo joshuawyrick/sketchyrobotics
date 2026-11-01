@@ -58,7 +58,7 @@ const OPENAI_BASE = process.env.OPENAI_BASE || 'https://api.openai.com';
 
 // ---------- settings ----------
 const SETTINGS_FILE = path.join(DATA, 'settings.json');
-const DEFAULT_SETTINGS = { model: 'gpt-image-2-2026-04-21', quality: 'medium', size: '1024x1536', inputFidelity: '', moderation: 'low', concurrency: 2, autoRun: true, pauseBetween: true, eventName: 'Sketchy Robotics', cameraZoom: 1.6 };
+const DEFAULT_SETTINGS = { model: 'gpt-image-2-2026-04-21', quality: 'medium', size: '1024x1536', moderation: 'low', concurrency: 2, autoRun: true, pauseBetween: true, eventName: 'Sketchy Robotics', cameraZoom: 1.6 };
 function getSettings() { try { return Object.assign({}, DEFAULT_SETTINGS, JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))); } catch (_) { return Object.assign({}, DEFAULT_SETTINGS); } }
 function saveSettings(s) { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2)); persist(SETTINGS_FILE); }
 
@@ -107,22 +107,24 @@ async function generateArt(job, override) {
   const theme = readTheme(job.theme); if (!theme) throw new Error('theme missing');
   const s = effectiveSettings(theme, job.variant, override);
   const prompt = (override && override.prompt != null ? String(override.prompt) : (theme.prompts[job.variant] || '')).trim(); if (!prompt) throw new Error(`no prompt saved for ${theme.name} / ${VARIANT_LABELS[job.variant]}`);
-  job.used = { model: s.model, quality: s.quality, size: s.size, inputFidelity: s.inputFidelity, moderation: s.moderation };
+  job.used = { model: s.model, quality: s.quality, size: s.size, moderation: s.moderation };
   if (!OPENAI_KEY) throw new Error('OPENAI_API_KEY is not set in Secrets');
   const photoFile = path.join(JOBS, job.id, 'photo.jpg'); if (!(await ensureLocal(photoFile))) throw new Error('photo missing'); const photo = fs.readFileSync(photoFile);
   const form = new FormData();
   form.append('model', s.model); form.append('prompt', prompt); form.append('n', '1');
   if (s.size) form.append('size', s.size); if (s.quality) form.append('quality', s.quality);
-  if (s.inputFidelity) form.append('input_fidelity', s.inputFidelity);
   if (s.moderation) form.append('moderation', s.moderation); // 'low' = less restrictive filter (still refuses the worst)
   form.append('output_format', 'png');
   form.append('image', new Blob([photo], { type: 'image/jpeg' }), 'photo.jpg');
   const call = async (f) => { const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 180000);
     try { const r = await fetch(OPENAI_BASE + '/v1/images/edits', { method: 'POST', headers: { Authorization: 'Bearer ' + OPENAI_KEY }, body: f, signal: ctrl.signal }); return { res: r, body: await r.json().catch(() => ({})) }; } finally { clearTimeout(t); } };
   let { res, body } = await call(form);
-  // a model that doesn't know a parameter (moderation / input_fidelity) says so in the error; drop it and try once more
-  const unknown = !res.ok && body.error && /unknown parameter|unsupported parameter|not supported|invalid.*parameter/i.test(body.error.message || '') && (body.error.message.match(/'(moderation|input_fidelity|quality)'/) || [])[1];
-  if (unknown) { form.delete(unknown); ({ res, body } = await call(form)); job.droppedParam = unknown; }
+  // a model that doesn't know a parameter says so ("does not support the 'moderation' parameter"); drop it and try again, up to 3 times
+  for (let i = 0; i < 3 && !res.ok && body.error; i++) {
+    const m = (body.error.message || '').match(/(?:does not support|not supported|unknown|unsupported|unrecognized)[^']*'([a-z_]+)'|'([a-z_]+)'[^.]*(?:is not supported|not supported|unknown)/i); const bad = m && (m[1] || m[2]);
+    if (!bad || !form.has(bad) || bad === 'model' || bad === 'prompt' || bad === 'image') break;
+    form.delete(bad); job.droppedParam = (job.droppedParam ? job.droppedParam + ', ' : '') + bad; ({ res, body } = await call(form));
+  }
   if (!res.ok) throw new Error('OpenAI ' + res.status + ': ' + (body.error && body.error.message || JSON.stringify(body)).slice(0, 300));
   const b64 = body.data && body.data[0] && body.data[0].b64_json; if (!b64) throw new Error('OpenAI returned no image');
   // normalise: flatten onto white, make sure it's a clean PNG the tracer likes
@@ -222,7 +224,7 @@ app.post('/api/jobs/:id/status', (req, res) => { const j = jobs.get(req.params.i
 // ----- admin -----
 app.post('/api/admin/login', (req, res) => { if ((req.body.password || '') === ADMIN_PASSWORD) res.json({ ok: true, token: ADMIN_PASSWORD }); else res.status(401).json({ error: 'wrong password' }); });
 app.get('/api/admin/state', adminAuth, (req, res) => res.json({ settings: getSettings(), themes: listThemes(), variants: VARIANT_LABELS, variantOrder: VARIANTS, jobs: sortedJobs().filter(j => !j.test).slice(-200).map(j => Object.assign(publicJob(j), { guestName: j.guestName, priority: j.priority })), hasKey: !!OPENAI_KEY, durable: !!bucket, readOnly: !!bucket && !IS_DEPLOYMENT }));
-app.post('/api/admin/settings', adminAuth, (req, res) => { const body = req.body || {}; const allowed = ['model', 'quality', 'size', 'inputFidelity', 'moderation', 'concurrency', 'eventName', 'cameraZoom']; const s = getSettings(); for (const k of allowed) if (k in body) s[k] = body[k]; saveSettings(s); res.json(Object.assign({ ok: true, durable: !!bucket && IS_DEPLOYMENT }, s)); });
+app.post('/api/admin/settings', adminAuth, (req, res) => { const body = req.body || {}; const allowed = ['model', 'quality', 'size', 'moderation', 'concurrency', 'eventName', 'cameraZoom']; const s = getSettings(); for (const k of allowed) if (k in body) s[k] = body[k]; saveSettings(s); res.json(Object.assign({ ok: true, durable: !!bucket && IS_DEPLOYMENT }, s)); });
 app.post('/api/admin/themes', adminAuth, (req, res) => { const name = String(req.body.name || '').trim(); if (!name) return res.status(400).json({ error: 'name required' }); let slug = slugify(name); if (readTheme(slug)) slug += '-' + Date.now().toString(36); writeTheme(slug, { name, enabled: true, order: listThemes().length + 1, prompts: {} }); res.json(readTheme(slug)); });
 app.put('/api/admin/themes/:slug', adminAuth, (req, res) => { const t = readTheme(slugify(req.params.slug)); if (!t) return res.status(404).end(); writeTheme(t.slug, Object.assign(t, req.body, { prompts: Object.assign(t.prompts, req.body.prompts || {}), variantModels: Object.assign(t.variantModels, req.body.variantModels || {}) })); res.json(readTheme(t.slug)); });
 app.delete('/api/admin/themes/:slug', adminAuth, (req, res) => { const d = path.join(THEMES, slugify(req.params.slug)); if (fs.existsSync(d)) { fs.rmSync(d, { recursive: true }); unpersist(d); } res.json({ ok: true }); });
@@ -253,7 +255,7 @@ app.post('/api/admin/lab', adminAuth, upload.single('photo'), async (req, res) =
       const job = { id, number: 0, status: 'processing', theme: theme.slug, themeName: theme.name, variant, createdAt: Date.now(), attempts: 1, test: true, lab: true, batch, labPrompt: prompt, labModel: model };
       fs.mkdirSync(path.join(JOBS, id), { recursive: true }); fs.writeFileSync(path.join(JOBS, id, 'photo.jpg'), photo); if (true) persist(path.join(JOBS, id, 'photo.jpg'));
       jobs.set(id, job); const t0 = Date.now();
-      const override = { model, prompt }; for (const k of ['quality', 'moderation', 'inputFidelity']) if (req.body[k]) override[k] = String(req.body[k]);
+      const override = { model, prompt }; for (const k of ['quality', 'moderation']) if (req.body[k]) override[k] = String(req.body[k]);
       try { await generateArt(job, override); job.status = 'test'; job.readyAt = Date.now(); } catch (e) { job.status = 'failed'; job.error = String(e.message || e); }
       job.seconds = Math.round((Date.now() - t0) / 1000); saveJob(job); return labJob(job);
     });
