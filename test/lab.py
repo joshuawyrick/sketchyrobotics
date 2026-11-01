@@ -23,6 +23,7 @@ async def main():
         await (await card.query_selector('button[data-apply]')).click(); await pg.wait_for_timeout(1200); print('toast:', await pg.text_content('#toast'))
         th = [x for x in json.load(urllib.request.urlopen(urllib.request.Request(B+'/api/admin/state', headers={'x-admin-token':'pw'})))['themes'] if x['slug']==t['slug']][0]
         print('theme prompt now:', th['prompts']['1-female'], '| variantModels:', th['variantModels'], '| enabled:', th['enabled'])
+        await (await pg.query_selector_all('#labOut .lab button[data-thumb]'))[1].click(); await pg.wait_for_timeout(1000); print('thumb toast:', await pg.text_content('#toast'), '| thumb http:', urllib.request.urlopen(B+'/api/themes/'+t['slug']+'/thumb').status)
         print('applied card marked:', len(await pg.query_selector_all('#labOut .lab.applied')))
         # history + ref reuse
         await pg.reload(); await pg.wait_for_timeout(1500); await pg.click('#nav [data-t=test]'); await pg.wait_for_timeout(500); await pg.select_option('#tTheme', t['slug']); await pg.wait_for_timeout(300)

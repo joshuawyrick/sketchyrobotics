@@ -271,6 +271,13 @@ app.post('/api/admin/lab/:id/apply', adminAuth, (req, res) => { // make this res
   writeTheme(theme.slug, theme); j.applied = { theme: theme.slug, variant, at: Date.now() }; saveJob(j);
   res.json({ ok: true, theme: readTheme(theme.slug) });
 });
+app.post('/api/admin/lab/:id/thumb', adminAuth, async (req, res) => { // use this result's line art as the theme's tile picture
+  const j = jobs.get(req.params.id); if (!j || !j.lab) return res.status(404).end();
+  const theme = readTheme(slugify(req.body.theme || j.theme)); if (!theme) return res.status(400).json({ error: 'bad theme' });
+  const art = path.join(JOBS, j.id, 'art.png'); if (!(await ensureLocal(art))) return res.status(404).json({ error: 'no image for this result' });
+  await sharp(art).resize(700, 700, { fit: 'inside', withoutEnlargement: true }).png().toFile(path.join(THEMES, theme.slug, 'thumb.png')); persist(path.join(THEMES, theme.slug, 'thumb.png'));
+  res.json({ ok: true, theme: theme.slug });
+});
 app.delete('/api/admin/lab/:id', adminAuth, (req, res) => { const j = jobs.get(req.params.id); if (j && j.lab) { jobs.delete(j.id); fs.rmSync(path.join(JOBS, j.id), { recursive: true, force: true }); unpersist(path.join(JOBS, j.id)); } res.json({ ok: true }); });
 app.post('/api/admin/jobs/:id', adminAuth, (req, res) => { // actions: retry, front, skip, requeue (draw again)
   const j = jobs.get(req.params.id); if (!j) return res.status(404).end();
