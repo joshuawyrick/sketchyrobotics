@@ -1083,7 +1083,7 @@ window.DEXARM_PEN_OFFSET=114;
     S.pos = p; // the commanded position is the one G-code moves to, so it is the one we save
     $('posTxt').textContent = `X ${S.pos.x.toFixed(2)}  Y ${S.pos.y.toFixed(2)}  Z ${S.pos.z.toFixed(2)}`; draw();
   };
-  link.onStatus = s => { $('status').textContent = s; $('status').classList.toggle('on', s === 'connected'); $('btnConnect').style.display = link.connected ? 'none' : ''; $('btnDisconnect').style.display = link.connected ? '' : 'none'; if (!link.connected) { $('fw').textContent = 'not connected'; S.running = false; } updateButtons(); log('[' + s + ']'); };
+  link.onStatus = s => { if (s === 'connected' && Q.resume && !Q.on) { Q.resume = false; Q.on = true; syncQ(); log('auto-run resumed after reconnect'); qRefresh(); } $('status').textContent = s; $('status').classList.toggle('on', s === 'connected'); $('btnConnect').style.display = link.connected ? 'none' : ''; $('btnDisconnect').style.display = link.connected ? '' : 'none'; if (!link.connected) { $('fw').textContent = 'not connected'; S.running = false; } updateButtons(); log('[' + s + ']'); };
   if (!DexSerial.supported()) { $('serialWarn').style.display = ''; $('btnConnect').disabled = true; }
 
   // ---------- paper ----------
@@ -1517,14 +1517,19 @@ window.DEXARM_PEN_OFFSET=114;
   // ---------- event queue + auto-run (talks to the Sketchy server when hosted by it) ----------
   const Q = { on: false, busy: false, current: null, timer: null, available: false };
   async function qFetch(url, opts) { const r = await fetch(url, opts); if (!r.ok) throw new Error(url + ' ' + r.status); return r.json(); }
+  async function qStatus(id, status, error) { // report a job's outcome; retries so a network hiccup can't leave it stuck in "drawing"
+    for (let i = 0; i < 5; i++) { try { return await qFetch('/api/jobs/' + id + '/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status, error: error || '' }) }); } catch (e) { if (i === 4) throw e; await new Promise(r => setTimeout(r, 1500)); } }
+  }
+  function clearCanvas() { for (const o of S.objects.slice()) deleteObj(o); S.gcode = null; refresh(); }
   async function qRefresh() {
     let d; try { d = await qFetch('/api/queue'); Q.available = true; } catch (_) { Q.available = false; $('qList').innerHTML = '<div class="note">Queue server not reachable (open this page from the Sketchy server to use the event queue).</div>'; return; }
+    if (!Q.checked) { Q.checked = true; for (const j of d.jobs.filter(j => j.status === 'drawing')) { log(`queue: #${j.number} was interrupted (page reloaded) — put back in line`); await qStatus(j.id, 'ready').catch(() => {}); j.status = 'ready'; } }
     const ready = d.jobs.filter(j => j.status === 'ready'), proc = d.jobs.filter(j => j.status === 'pending' || j.status === 'processing');
     $('qSum').textContent = `${ready.length} ready · ${proc.length} generating · ${d.done.length} drawn`;
     $('qList').innerHTML = d.jobs.filter(j => ['ready', 'drawing'].includes(j.status)).slice(0, 12).map(j => `<div class="qItem ${j.status}" data-id="${j.id}"><img src="/api/jobs/${j.id}/art?thumb=1"><div><b>#${j.number}</b> ${j.themeName}<br><span class="note">${j.status === 'drawing' ? '✎ drawing now' : 'ready'}</span></div><button data-skip="${j.id}" title="Skip this one">✕</button></div>`).join('') || '<div class="note">Nothing ready yet.</div>';
     $('qList').querySelectorAll('button[data-skip]').forEach(b => b.onclick = async () => { await qFetch('/api/jobs/' + b.dataset.skip + '/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'skipped' }) }); qRefresh(); });
     $('btnQNext').disabled = !ready.length || S.running || Q.busy || !link.connected;
-    if (Q.on && !Q.busy && !S.running && ready.length && link.connected && !Q.waitingContinue) qDrawNext();
+    if (Q.on && !Q.busy && !S.running && !Q.waitingContinue) { if (ready.length) { if (link.connected) qDrawNext(); else $('qStatus').textContent = 'auto-run: waiting for the arm to reconnect…'; } else if (!/done|problem|stopped/.test($('qStatus').textContent)) $('qStatus').textContent = 'auto-run on — waiting for the next guest…'; }
   }
   async function qDrawNext() {
     if (Q.busy || S.running) return; Q.busy = true; $('btnQNext').disabled = true;
@@ -1540,13 +1545,15 @@ window.DEXARM_PEN_OFFSET=114;
       generate(); if (!S.gcode) throw new Error(S.block || 'no g-code');
       $('qStatus').textContent = `#${job.number}: drawing…`;
       const ok = await runDrawing();
-      await qFetch('/api/jobs/' + job.id + '/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: ok ? 'done' : 'failed', error: ok ? '' : 'stopped' }) });
+      await qStatus(job.id, ok ? 'done' : 'failed', ok ? '' : 'stopped');
+      Q.current = null; clearCanvas();
       $('qStatus').textContent = ok ? `#${job.number} done ✓` : `#${job.number} stopped`;
       if (ok && Q.on && $('qPause').checked) { Q.waitingContinue = true; $('qStatus').textContent = `#${job.number} done ✓ — change the paper, then press Continue`; $('btnQContinue').style.display = ''; }
+      else if (ok && Q.on) $('qStatus').textContent = `#${job.number} done ✓ — next one starts automatically`;
       if (!ok) { Q.on = false; syncQ(); }
     } catch (e) {
       log('queue: ' + e.message, 'err'); $('qStatus').textContent = 'problem: ' + e.message;
-      if (Q.current) await qFetch('/api/jobs/' + Q.current.id + '/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: /skipped/.test(e.message) ? 'skipped' : 'failed', error: e.message }) }).catch(() => {});
+      if (Q.current) { await qStatus(Q.current.id, /skipped/.test(e.message) ? 'skipped' : 'failed', e.message).catch(() => {}); Q.current = null; clearCanvas(); }
     }
     Q.busy = false; Q.current = null; qRefresh();
   }
@@ -1561,11 +1568,13 @@ window.DEXARM_PEN_OFFSET=114;
   }
   $('qSize').addEventListener('change', () => { $('qSizeCustomRow').style.display = $('qSize').value === 'custom' ? '' : 'none'; });
   $('qSizeCustomRow').style.display = $('qSize').value === 'custom' ? '' : 'none';
-  function syncQ() { $('btnQAuto').textContent = Q.on ? '■ Stop auto-run' : '▶ Auto-run queue'; $('btnQAuto').classList.toggle('danger', Q.on); $('btnQAuto').classList.toggle('primary', !Q.on); if (!Q.on) { Q.waitingContinue = false; $('btnQContinue').style.display = 'none'; } }
+  function syncQ() { try { localStorage.setItem('dexdraw.autoRun', Q.on ? '1' : '0'); } catch (_) { } $('btnQAuto').textContent = Q.on ? '■ Stop auto-run' : '▶ Auto-run queue'; $('btnQAuto').classList.toggle('danger', Q.on); $('btnQAuto').classList.toggle('primary', !Q.on); if (!Q.on) { Q.waitingContinue = false; $('btnQContinue').style.display = 'none'; } }
   $('btnQAuto').addEventListener('click', () => { if (!link.connected) { log('connect the arm first', 'err'); return; } Q.on = !Q.on; syncQ(); if (Q.on) { log('auto-run on: setup must be done (Home, pen height, paper center)'); qRefresh(); } });
   $('btnQNext').addEventListener('click', () => { if (!link.connected) { log('connect the arm first', 'err'); return; } qDrawNext(); });
   $('btnQContinue').addEventListener('click', () => { Q.waitingContinue = false; $('btnQContinue').style.display = 'none'; qRefresh(); });
   $('btnQSkipCur').addEventListener('click', () => { Q.cancelPreview = true; if (S.running) S.stopFlag = true; });
+  // auto-run survives a page reload: it resumes as soon as the arm has reconnected
+  Q.resume = localStorage.getItem('dexdraw.autoRun') === '1';
   syncQ(); qRefresh(); Q.timer = setInterval(qRefresh, 4000);
 
   // ---------- hover help ----------
