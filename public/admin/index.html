@@ -145,7 +145,7 @@
     const counts = {}; for (const j of all) counts[j.status] = (counts[j.status] || 0) + 1;
     $('qsum').textContent = Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(' · ') || 'empty';
     const drawn = all.filter(j => j.drawSeconds); if (drawn.length) { const avg = drawn.reduce((a, j) => a + j.drawSeconds, 0) / drawn.length; const w = drawn.filter(j => j.widthMm); $('drawStats').textContent = `Draw time: ${drawn.length} drawing${drawn.length > 1 ? 's' : ''} logged · average ${fmtS(avg)} · fastest ${fmtS(Math.min(...drawn.map(j => j.drawSeconds)))} · slowest ${fmtS(Math.max(...drawn.map(j => j.drawSeconds)))}${w.length ? ` · average width ${(w.reduce((a, j) => a + j.widthMm, 0) / w.length / 25.4).toFixed(1)} in` : ''}`; } else $('drawStats').textContent = 'Draw times appear here once the robot has finished a drawing.';
-    $('csvLink').href = '/api/admin/drawlog.csv?token=' + encodeURIComponent(TOKEN);
+    $('csvLink').href = '/api/admin/drawlog.csv?token=' + encodeURIComponent(TOKEN) + '&tz=' + encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Los_Angeles');
     for (const id of Array.from(SEL)) if (!js.some(j => j.id === id)) SEL.delete(id);
     $('qbody').innerHTML = js.map(j => `<tr>
       <td><input type="checkbox" class="selRow" data-id="${j.id}" ${SEL.has(j.id) ? 'checked' : ''}></td>

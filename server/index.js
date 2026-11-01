@@ -301,11 +301,24 @@ app.post('/api/admin/jobs-bulk', adminAuth, (req, res) => { // { ids: [...], act
     saveJob(j); }
   pump(); res.json({ ok: true, n });
 });
-app.get('/api/admin/drawlog.csv', adminAuth, (req, res) => { // every drawing that finished, oldest first
-  const rows = sortedJobs().filter(j => j.doneAt && !j.test).map(j => [j.number, j.themeName, VARIANT_LABELS[j.variant] || j.variant, new Date(j.createdAt).toISOString(), new Date(j.doneAt).toISOString(), j.widthMm ? (j.widthMm / 25.4).toFixed(2) : '', j.strokes || '', j.drawSeconds || '', j.preset || '', j.status]);
+app.get('/api/admin/drawlog.csv', adminAuth, (req, res) => { // every drawing that finished, oldest first, in the admin's local time
+  const tz = String(req.query.tz || 'America/Los_Angeles'); let fmtD, fmtT;
+  try { fmtD = new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }); fmtT = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }); }
+  catch (_) { fmtD = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' }); fmtT = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }); }
+  const mmss = sec => sec ? `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}` : '';
+  const rows = []; let total = 0, measured = 0, timed = 0;
+  for (const j of sortedJobs().filter(j => j.doneAt && !j.test)) {
+    // draw_seconds is the arm's measured time (logged since the draw-time feature); older rows fall back to claim→done, which includes conversion/preview
+    const sec = j.drawSeconds || (j.drawStartedAt && j.doneAt > j.drawStartedAt ? Math.round((j.doneAt - j.drawStartedAt) / 10) / 100 : 0); const src = j.drawSeconds ? 'measured' : sec ? 'claim-to-done' : '';
+    if (sec) { total += sec; timed++; if (j.drawSeconds) measured++; }
+    rows.push([j.number, j.themeName, VARIANT_LABELS[j.variant] || j.variant, fmtD.format(j.createdAt), fmtT.format(j.createdAt), fmtD.format(j.doneAt), fmtT.format(j.doneAt), j.widthMm ? (j.widthMm / 25.4).toFixed(2) : '', j.strokes || '', sec || '', mmss(sec), src, j.preset || '', j.status]);
+  }
   const esc = v => /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
+  const lines = ['number,theme,variant,photo_date,photo_time,drawn_date,drawn_time,width_in,strokes,draw_seconds,draw_mm_ss,time_source,speed_preset,status', ...rows.map(r => r.map(esc).join(','))];
+  lines.push('', `TOTAL,${rows.length} drawings,,,,,,,,${Math.round(total * 10) / 10},${mmss(total)},${timed} timed (${measured} measured),,`);
+  if (timed) lines.push(`AVERAGE,,,,,,,,,${Math.round(total / timed * 10) / 10},${mmss(total / timed)},per timed drawing,,`);
   res.setHeader('content-type', 'text/csv'); res.setHeader('content-disposition', 'attachment; filename="sketchy-draw-log.csv"');
-  res.send(['number,theme,variant,photo_taken,drawn_at,width_in,strokes,draw_seconds,speed_preset,status', ...rows.map(r => r.map(esc).join(','))].join('\n'));
+  res.send(lines.join('\n'));
 });
 app.get('/api/jobs/:id/photo', adminAuth, async (req, res) => { const f = path.join(JOBS, req.params.id, 'photo.jpg'); if (await ensureLocal(f)) res.sendFile(f); else res.status(404).end(); });
 
