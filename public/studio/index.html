@@ -207,6 +207,7 @@
     <section>
       <h2>Event queue <span class="note" id="qSum" style="margin-left:auto"></span></h2>
       <div class="body">
+        <div class="note" id="resumeBox" style="display:none;border:2px solid var(--acc);border-radius:10px;padding:8px 10px;margin-bottom:8px;background:#eaf2ff;color:var(--ink)"></div>
         <div class="qCur" id="qCur" style="display:none"><img id="qCurImg" alt=""><div><b id="qCurName"></b><div class="note" id="qCurNote"></div></div></div>
         <div class="btns"><button id="btnQNext" class="primary big">1 · Load next sketch</button><button id="btnQDraw" class="primary big" style="display:none">2 · Draw it</button><button id="btnQContinue" class="primary big" style="display:none">Continue →</button><button id="btnQSkipCur" class="danger">✕ Skip</button></div>
         <div class="note" id="qStatus">Guests' sketches appear here when ready.</div>
@@ -216,8 +217,8 @@
         <div class="row"><label>Drawing size for this event</label><select id="qSize"><option value="fit">Fit to page</option><option value="4">4 in wide</option><option value="5">5 in wide</option><option value="6" selected>6 in wide</option><option value="7">7 in wide</option><option value="8">8 in wide</option><option value="custom">Custom…</option></select></div>
         <div class="row" id="qSizeCustomRow" style="display:none"><label>Custom width</label><input id="qSizeCustom" type="number" value="5.5" step="0.25" min="1"><span class="unit">in</span></div>
         <div class="row"><label>Place on page</label><select id="qPlace"><option value="center" selected>Centered</option><option value="top">Top (leave room below)</option><option value="bottom">Bottom (leave room above)</option></select></div>
-        <div class="row"><label>Draw guests' names</label><input id="qNames" type="checkbox" checked><select id="qNamePos" style="width:auto"><option value="above" selected>above the drawing</option><option value="below">below the drawing</option></select></div>
-        <div class="row"><label>Name lettering</label><select id="qNameFont" style="width:auto"><option value="Clean" selected>Clean</option><option value="Script">Script</option><option value="Serif">Serif</option></select><input id="qNameH" type="number" value="12" min="5" max="40" step="1" style="width:64px"><span class="unit">mm tall</span></div>
+        <div class="row" style="display:none"><label>Draw guests' names</label><input id="qNames" type="checkbox"><select id="qNamePos" style="width:auto"><option value="above" selected>above the drawing</option><option value="below">below the drawing</option></select></div>
+        <div class="row" style="display:none"><label>Name lettering</label><select id="qNameFont" style="width:auto"><option value="Clean" selected>Clean</option><option value="Script">Script</option><option value="Serif">Serif</option></select><input id="qNameH" type="number" value="12" min="5" max="40" step="1" style="width:64px"><span class="unit">mm tall</span></div>
         <div id="qList" class="qList"></div>
       </div>
     </section>
@@ -1143,7 +1144,7 @@ window.DEXARM_PEN_OFFSET=114;
     S.pos = p; // the commanded position is the one G-code moves to, so it is the one we save
     $('posTxt').textContent = `X ${S.pos.x.toFixed(2)}  Y ${S.pos.y.toFixed(2)}  Z ${S.pos.z.toFixed(2)}`; draw();
   };
-  link.onStatus = s => { if (s === 'connected' && Q.resume && !Q.on) { Q.resume = false; Q.on = true; syncQ(); log('auto-run resumed after reconnect'); qRefresh(); } $('status').textContent = s; $('status').classList.toggle('on', s === 'connected'); $('btnConnect').style.display = link.connected ? 'none' : ''; $('btnDisconnect').style.display = link.connected ? '' : 'none'; if (!link.connected) { $('fw').textContent = 'not connected'; S.running = false; } updateButtons(); log('[' + s + ']'); };
+  link.onStatus = s => { if (s === 'connected') setTimeout(offerResume, 300); if (s === 'connected' && Q.resume && !Q.on) { Q.resume = false; Q.on = true; syncQ(); log('auto-run resumed after reconnect'); qRefresh(); } $('status').textContent = s; $('status').classList.toggle('on', s === 'connected'); $('btnConnect').style.display = link.connected ? 'none' : ''; $('btnDisconnect').style.display = link.connected ? '' : 'none'; if (!link.connected) { $('fw').textContent = 'not connected'; S.running = false; } updateButtons(); log('[' + s + ']'); };
   if (!DexSerial.supported()) { $('serialWarn').style.display = ''; $('btnConnect').disabled = true; }
 
   // ---------- paper ----------
@@ -1435,19 +1436,52 @@ window.DEXARM_PEN_OFFSET=114;
   $('cmd').addEventListener('keydown', e => { if (e.key === 'Enter') $('btnSend').click(); });
 
   // ---------- streaming ----------
-  async function runDrawing() {
-    if (!S.gcode) generate(); if (!S.gcode || !link.connected) { if (S.block) log(S.block, 'err'); return false; }
+  // ---- resume after an accidental reload: progress is checkpointed to the browser every 2 s while drawing ----
+  const RESUME_KEY = 'dexdraw.resume.v1';
+  function saveCheckpoint(cp) { try { localStorage.setItem(RESUME_KEY, JSON.stringify(cp)); } catch (_) { } }
+  function clearCheckpoint() { try { localStorage.removeItem(RESUME_KEY); } catch (_) { } }
+  function loadCheckpoint() { try { const c = JSON.parse(localStorage.getItem(RESUME_KEY) || 'null'); return c && c.gcode && c.line > 0 && c.line < c.total ? c : null; } catch (_) { return null; } }
+  /** a program that starts at line `from` of `gcode`: setup lines, clearance, travel pen-up to where we stopped, pen down if we were drawing */
+  function resumeProgram(gcode, from) {
+    const lines = gcode.split('\n'); const o = gcodeOpts();
+    const setup = lines.filter(l => /^(G21|G90|M888|M2000|M2001|M204|M205)\b/.test(l.trim()));
+    let penDown = false, x = null, y = null;
+    for (let i = 0; i < from; i++) { const l = lines[i].trim(); if (/^G1 Z/.test(l)) penDown = true; else if (/^G0 Z/.test(l)) penDown = false; const m = l.match(/^G[01] X(-?[\d.]+) Y(-?[\d.]+)/); if (m) { x = +m[1]; y = +m[2]; } }
+    const out = setup.concat([`G0 Z${o.approachZ} F${o.zSpeed} ; resume: clearance`]);
+    if (x != null) out.push(`G0 X${x} Y${y} F${o.travelSpeed} ; resume: back to where we stopped (pen up)`);
+    if (penDown) out.push(`G0 Z${o.penUpZ} F${o.zSpeed}`, `G1 Z${o.penDownZ} F${o.zSpeed} ; resume: pen back down`);
+    return out.concat(lines.slice(from)).join('\n');
+  }
+  async function runDrawing(resume) { // resume = { gcode, line, total, ... } to continue an interrupted drawing
+    const program = resume ? resumeProgram(resume.gcode, resume.line) : S.gcode;
+    if (!resume && !S.gcode) generate(); if ((!resume && !S.gcode) || !link.connected) { if (S.block) log(S.block, 'err'); return false; }
     S.running = true; S.paused = false; S.stopFlag = false; updateButtons();
-    const t0 = performance.now(); let ok = false; const o = gcodeOpts();
+    const t0 = performance.now(); let ok = false; const o = gcodeOpts(); let lastSave = 0;
+    const base = resume ? resume : { gcode: S.gcode, total: S.gcode.split('\n').length, job: Q.current ? { id: Q.current.id, number: Q.current.number, themeName: Q.current.themeName } : null, name: (S.objects[0] || {}).name || '', secondsBefore: 0 };
+    const offset = resume ? resume.line - (program.split('\n').length - (resume.total - resume.line)) : 0; // maps progress in the resume program back to lines of the original
     try {
-      const done = await link.stream(S.gcode, {
+      const done = await link.stream(program, {
         inflight: num('inflight'), shouldPause: () => S.paused, shouldStop: () => S.stopFlag, onStatus: m => log('⚠ ' + m, 'err'), penUp: `G0 Z${o.penUpZ} F${o.zSpeed}`, penDown: `G1 Z${o.penDownZ} F${o.zSpeed}`,
-        onProgress: (i, n) => { $('prog').firstElementChild.style.width = (100 * i / n) + '%'; $('progTxt').textContent = `${i} / ${n} lines · ${((performance.now() - t0) / 1000).toFixed(0)} s`; }
+        onProgress: (i, n) => { $('prog').firstElementChild.style.width = (100 * i / n) + '%'; $('progTxt').textContent = `${i} / ${n} lines · ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+          const orig = Math.max(0, Math.min(base.total - 1, i + offset)); if (performance.now() - lastSave > 2000) { lastSave = performance.now(); saveCheckpoint({ gcode: base.gcode, total: base.total, line: orig, job: base.job, name: base.name, secondsBefore: (base.secondsBefore || 0) + (performance.now() - t0) / 1000, at: Date.now() }); } }
       });
-      S.lastDrawSeconds = (performance.now() - t0) / 1000; log(`done: ${done} lines in ${S.lastDrawSeconds.toFixed(1)} s`); ok = true;
+      S.lastDrawSeconds = (base.secondsBefore || 0) + (performance.now() - t0) / 1000; log(`done: ${done} lines in ${((performance.now() - t0) / 1000).toFixed(1)} s${resume ? ' (resumed)' : ''}`); ok = true;
     } catch (e) { if (/stopped/.test(e.message)) log('drawing stopped — pen lifted, position still valid (no Home needed)', 'err'); else log('drawing ' + e.message, 'err'); }
-    S.running = false; S.paused = false; updateButtons();
+    clearCheckpoint(); S.running = false; S.paused = false; updateButtons();
     return ok;
+  }
+  /** after a reload: offer to continue the drawing that was in progress */
+  function offerResume() {
+    const cp = loadCheckpoint(); const box = $('resumeBox'); if (!cp || !box) { if (box) box.style.display = 'none'; return; }
+    const who = cp.job ? `#${cp.job.number} ${cp.job.themeName}` : (cp.name || 'the drawing'); const pct = Math.round(100 * cp.line / cp.total);
+    box.style.display = ''; box.innerHTML = `<b>Reloaded mid-drawing:</b> ${who} stopped at line ${cp.line.toLocaleString()} of ${cp.total.toLocaleString()} (${pct}%). <button class="primary" id="btnResume">▶ Resume from there</button> <button id="btnResumeNo">Start over / forget</button>`;
+    $('btnResume').onclick = async () => { if (!link.connected) { log('connect the arm first', 'err'); return; } if (S.needsHome) { log('press ⌂ Home first', 'err'); return; } box.style.display = 'none';
+      if (cp.job) { Q.current = cp.job; Q.busy = true; $('qStatus').textContent = `#${cp.job.number}: resuming from ${pct}%…`; await qStatus(cp.job.id, 'ready').catch(() => {}); await qFetch('/api/queue/claim-id/' + cp.job.id, { method: 'POST' }).catch(() => {}); }
+      log(`resuming ${who} at line ${cp.line} — the arm travels pen-up to where it stopped, then continues`);
+      const ok = await runDrawing(cp);
+      if (cp.job) { await qStatus(cp.job.id, ok ? 'done' : 'ready', ok ? '' : 'stopped by operator', ok ? Object.assign(drawReport(), { drawSeconds: S.lastDrawSeconds }) : null).catch(() => {}); $('qStatus').textContent = ok ? `#${cp.job.number} done ✓ (resumed) — fresh paper in, then 1 · Load next sketch.` : `#${cp.job.number} stopped — it is back at the front of the line.`; Q.busy = false; Q.current = null; qRefresh(); }
+    };
+    $('btnResumeNo').onclick = () => { clearCheckpoint(); box.style.display = 'none'; qRefresh(); };
   }
   $('btnStart').addEventListener('click', () => runDrawing());
   $('btnPause').addEventListener('click', () => { S.paused = !S.paused; $('btnPause').textContent = S.paused ? '▶ Resume' : '⏸ Pause'; log(S.paused ? 'paused (finishing buffered moves)' : 'resumed'); });
@@ -1591,14 +1625,14 @@ window.DEXARM_PEN_OFFSET=114;
   function clearCanvas() { for (const o of S.objects.slice()) deleteObj(o); S.gcode = null; refresh(); }
   async function qRefresh() {
     let d; try { d = await qFetch('/api/queue'); Q.available = true; } catch (_) { Q.available = false; $('qList').innerHTML = '<div class="note">Queue server not reachable (open this page from the Sketchy server to use the event queue).</div>'; return; }
-    if (!Q.checked) { Q.checked = true; for (const j of d.jobs.filter(j => j.status === 'drawing')) { log(`queue: #${j.number} was interrupted (page reloaded) — put back in line`); await qStatus(j.id, 'ready').catch(() => {}); j.status = 'ready'; } }
+    if (!Q.checked) { Q.checked = true; const cp = loadCheckpoint(); for (const j of d.jobs.filter(j => j.status === 'drawing' && !(cp && cp.job && cp.job.id === j.id))) { log(`queue: #${j.number} was interrupted (page reloaded) — put back in line`); await qStatus(j.id, 'ready').catch(() => {}); j.status = 'ready'; } }
     const ready = d.jobs.filter(j => j.status === 'ready'), proc = d.jobs.filter(j => j.status === 'pending' || j.status === 'processing');
     $('qSum').textContent = `${ready.length} ready · ${proc.length} generating · ${d.done.length} drawn`;
     $('qList').innerHTML = d.jobs.filter(j => ['ready', 'drawing'].includes(j.status)).slice(0, 12).map(j => `<div class="qItem ${j.status}" data-id="${j.id}"><img src="/api/jobs/${j.id}/art?thumb=1"><div><b>#${j.number}</b> ${j.themeName}<br><span class="note">${j.status === 'drawing' ? '✎ drawing now' : 'ready'}</span></div><button data-skip="${j.id}" title="Skip this one">✕</button></div>`).join('') || '<div class="note">Nothing ready yet.</div>';
     $('qList').querySelectorAll('button[data-skip]').forEach(b => b.onclick = async () => { await qFetch('/api/jobs/' + b.dataset.skip + '/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'skipped' }) }); qRefresh(); });
     $('btnQNext').disabled = !ready.length || S.running || Q.busy || !link.connected || S.needsHome || !!Q.loaded; $('btnQNext').textContent = ready.length ? `1 · Load next sketch (${ready.length} waiting)` : '1 · Load next sketch'; syncStep();
     if (S.needsHome && Q.on) { Q.on = false; syncQ(); $('qStatus').textContent = 'STOP was used — press ⌂ Home, then start again'; }
-    if (Q.on && !Q.busy && !S.running && !Q.waitingContinue) { if (ready.length || Q.loaded) { if (link.connected) qAutoStep(); else $('qStatus').textContent = 'auto-run: waiting for the arm to reconnect…'; } else if (!/done|problem|stopped/.test($('qStatus').textContent)) $('qStatus').textContent = 'auto-run on — waiting for the next guest…'; }
+    if (Q.on && !Q.busy && !S.running && !Q.waitingContinue && !loadCheckpoint()) { if (ready.length || Q.loaded) { if (link.connected) qAutoStep(); else $('qStatus').textContent = 'auto-run: waiting for the arm to reconnect…'; } else if (!/done|problem|stopped/.test($('qStatus').textContent)) $('qStatus').textContent = 'auto-run on — waiting for the next guest…'; }
   }
   const fmtS = sec => `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}`;
   function syncStep() { // the one-button-at-a-time controls

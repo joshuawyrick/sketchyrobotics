@@ -214,7 +214,8 @@
     setTimeout(() => { const first = $('nameFields').querySelector('input'); if (first) first.focus(); }, 150);
   }
   const toCam = () => { $('crumb2').textContent = `${S.theme.name} · ${variantLabel()}`; openCam(); show('s-cam'); };
-  $('nextWho').onclick = () => { renderNames(); show('s-names'); };
+  const NAMES_ENABLED = false; // name lettering parked for now — set true to bring the name screen back
+  $('nextWho').onclick = () => { if (NAMES_ENABLED) { renderNames(); show('s-names'); } else { S.names = {}; toCam(); } };
   $('backNames').onclick = () => show('s-who');
   $('skipNames').onclick = () => { S.names = {}; toCam(); };
   $('nextNames').onclick = () => { document.activeElement && document.activeElement.blur(); toCam(); };

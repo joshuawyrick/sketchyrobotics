@@ -10,7 +10,7 @@ async def main():
         br = await p.chromium.launch(args=['--use-fake-ui-for-media-stream','--use-fake-device-for-media-stream'])
         ipad = await (await br.new_context(viewport={'width':834,'height':1194}, permissions=['camera'])).new_page(); errs=[]; ipad.on('pageerror', lambda e: errs.append('ipad '+str(e)))
         await ipad.goto('http://localhost:3461/'); await ipad.wait_for_timeout(500)
-        await ipad.click('.tile:has-text("Evil Clown")'); await ipad.click('.choice[data-w="1"]'); await ipad.click('.pair .choice:has-text("Female")'); await ipad.click('#nextWho'); await ipad.click('#skipNames'); await ipad.wait_for_timeout(1000)
+        await ipad.click('.tile:has-text("Evil Clown")'); await ipad.click('.choice[data-w="1"]'); await ipad.click('.pair .choice:has-text("Female")'); await ipad.click('#nextWho'); await ipad.wait_for_timeout(1000)
         await ipad.click('#phoneBtn'); await ipad.wait_for_timeout(800)
         code = await ipad.text_content('#qrCode'); print('QR shown:', await ipad.is_visible('#qr'), '| code:', code, '| qr svg bytes:', len(urllib.request.urlopen(f'http://localhost:3461/api/phone/{code}/qr.svg').read()))
         await ipad.screenshot(path='test/phone-ipad-qr.png')

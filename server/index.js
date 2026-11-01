@@ -219,6 +219,7 @@ app.post('/api/queue/claim', (req, res) => { // next ready -> drawing
   const j = sortedJobs().find(j => j.status === 'ready'); if (!j) return res.json({ job: null });
   j.status = 'drawing'; j.drawStartedAt = Date.now(); saveJob(j); res.json({ job: publicJob(j) });
 });
+app.post('/api/queue/claim-id/:id', (req, res) => { const j = jobs.get(req.params.id); if (!j) return res.status(404).end(); j.status = 'drawing'; j.drawStartedAt = j.drawStartedAt || Date.now(); saveJob(j); res.json({ job: publicJob(j) }); }); // resume after a reload
 app.post('/api/jobs/:id/status', (req, res) => { const j = jobs.get(req.params.id); if (!j) return res.status(404).end(); const st = String(req.body.status); if (!['done', 'ready', 'skipped', 'failed'].includes(st)) return res.status(400).end(); j.status = st; if (st === 'done') j.doneAt = Date.now(); if (req.body.error) j.error = String(req.body.error); else if (st === 'done') j.error = null;
   for (const k of ['drawSeconds', 'strokes', 'widthMm']) if (req.body[k] != null && isFinite(+req.body[k])) j[k] = Math.round(+req.body[k] * 10) / 10; if (req.body.preset) j.preset = String(req.body.preset).slice(0, 60); // draw-time log
   saveJob(j); res.json(publicJob(j)); });
