@@ -120,7 +120,10 @@
           <div class="row"><label>Invert (white on black)</label><input id="imgInv" type="checkbox"></div>
           <div class="row"><label>Working resolution</label><input id="imgRes" type="number" value="2800" step="100"><span class="unit">px</span></div>
           <div class="row"><label>Drop specks under</label><input id="imgSpeck" type="number" value="11" step="1"><span class="unit">px</span></div>
-          <div class="row"><label>Smoothing passes</label><input id="imgSmooth" type="number" value="5" step="1" min="0" max="8"><span class="unit"></span></div>
+          <div class="row"><label>Pen line width</label><input id="penW" type="number" value="0.5" min="0.1" max="2" step="0.05"><span class="unit">mm</span></div>
+        <div class="row"><label>Fill shapes wider than</label><input id="fillX" type="number" value="2" min="0" max="5" step="0.1"><span class="unit">× pen</span></div>
+        <div class="row"><label>Solid spots as dots</label><input id="imgDots" type="checkbox" checked></div>
+        <div class="row"><label>Smoothing passes</label><input id="imgSmooth" type="number" value="5" step="1" min="0" max="8"><span class="unit"></span></div>
           <div class="row"><label>Trim whiskers under</label><input id="imgPrune" type="number" value="4" step="2"><span class="unit">px</span></div>
           <div class="row"><label>Blur first (noisy photos only)</label><input id="imgBlur" type="checkbox"></div>
           <div class="btns"><button id="btnRetrace">Re-trace</button><button id="btnDlSvg">Download as SVG</button></div>
@@ -165,6 +168,7 @@
         <div class="row"><label>Simplify tolerance (outside zone)</label><input id="optSimp" type="number" value="0.12" step="0.05"><span class="unit">mm</span></div>
         <div class="row"><label>Min line length (outside zone)</label><input id="optMin" type="number" value="1.5" step="0.5"><span class="unit">mm</span></div>
         <div class="row"><label>Min line length (in zone)</label><input id="optMinDetail" type="number" value="1" step="0.5"><span class="unit">mm</span></div>
+        <div class="row"><label>Pen speed in zone</label><input id="zoneSpeed" type="number" value="60" min="20" max="100" step="5"><span class="unit">%</span></div>
         <div class="row"><label>Simplify tolerance (in zone)</label><input id="optSimpDetail" type="number" value="0.08" step="0.02"><span class="unit">mm</span></div>
         <div class="btns"><button id="btnZone">Detail zone: off</button><button id="btnZoneEdit" style="display:none">Move / resize zone</button></div>
         <div class="note">Drag the detail zone over the face (eyes, nose, mouth): inside it every short line and fine curve is kept; outside it, hair wisps are dropped and curves are simplified.</div>
@@ -685,6 +689,42 @@ window.DEXARM_PEN_OFFSET=114;
   /** trace(img, opts) -> { polylines (pixel units), binary, width, height }
    *  opts: { mode:'ink'|'edge', threshold:0-255, invert, blur, minBlobPx }
    */
+  /** chamfer (3-4) distance to the nearest zero pixel, in pixel units; 0 on zero pixels */
+  function distanceTransform(b, w, h) {
+    const INF = 1e9, d = new Float32Array(b.length);
+    for (let i = 0; i < b.length; i++) d[i] = b[i] ? INF : 0;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x; if (!d[i]) continue; let v = d[i];
+      if (x > 0) v = Math.min(v, d[i - 1] + 3); if (y > 0) { v = Math.min(v, d[i - w] + 3); if (x > 0) v = Math.min(v, d[i - w - 1] + 4); if (x < w - 1) v = Math.min(v, d[i - w + 1] + 4); } d[i] = v; }
+    for (let y = h - 1; y >= 0; y--) for (let x = w - 1; x >= 0; x--) { const i = y * w + x; if (!d[i]) continue; let v = d[i];
+      if (x < w - 1) v = Math.min(v, d[i + 1] + 3); if (y < h - 1) { v = Math.min(v, d[i + w] + 3); if (x < w - 1) v = Math.min(v, d[i + w + 1] + 4); if (x > 0) v = Math.min(v, d[i + w - 1] + 4); } d[i] = v; }
+    for (let i = 0; i < d.length; i++) d[i] = d[i] >= INF ? 0 : d[i] / 3; // edge pixels get 1
+    return d;
+  }
+  /** iso-contours of a scalar field at `level` (marching squares), linked into closed polylines in pixel coordinates */
+  function contours(f, w, h, level) {
+    const segs = new Map(); const key = (x, y) => (Math.round(x * 2) * 131071 + Math.round(y * 2)); const out = []; const adj = new Map();
+    const lerp = (a, b, va, vb) => a + (level - va) / (vb - va || 1e-9) * (b - a);
+    for (let y = 0; y < h - 1; y++) for (let x = 0; x < w - 1; x++) {
+      const v0 = f[y * w + x], v1 = f[y * w + x + 1], v2 = f[(y + 1) * w + x + 1], v3 = f[(y + 1) * w + x];
+      const c = (v0 > level ? 1 : 0) | (v1 > level ? 2 : 0) | (v2 > level ? 4 : 0) | (v3 > level ? 8 : 0); if (c === 0 || c === 15) continue;
+      const T = [lerp(x, x + 1, v0, v1), y], R = [x + 1, lerp(y, y + 1, v1, v2)], B = [lerp(x, x + 1, v3, v2), y + 1], L = [x, lerp(y, y + 1, v0, v3)];
+      const E = { 1: [[L, T]], 2: [[T, R]], 3: [[L, R]], 4: [[R, B]], 5: [[L, T], [R, B]], 6: [[T, B]], 7: [[L, B]], 8: [[B, L]], 9: [[B, T]], 10: [[T, R], [B, L]], 11: [[B, R]], 12: [[R, L]], 13: [[R, T]], 14: [[T, L]] }[c];
+      for (const [a, b] of E) { const ka = key(a[0], a[1]), kb = key(b[0], b[1]); if (!adj.has(ka)) adj.set(ka, []); if (!adj.has(kb)) adj.set(kb, []); adj.get(ka).push([kb, b]); adj.get(kb).push([ka, a]); if (!segs.has(ka)) segs.set(ka, a); if (!segs.has(kb)) segs.set(kb, b); }
+    }
+    const used = new Set();
+    for (const [k0, p0] of segs) { if (used.has(k0)) continue; const poly = [{ x: p0[0], y: p0[1] }]; let k = k0; used.add(k);
+      for (;;) { const nx = (adj.get(k) || []).find(([kn]) => !used.has(kn)); if (!nx) break; used.add(nx[0]); poly.push({ x: nx[1][0], y: nx[1][1] }); k = nx[0]; }
+      if (poly.length > 3) { poly.push({ x: poly[0].x, y: poly[0].y }); out.push(poly); } }
+    return out;
+  }
+  /** horizontal hatch lines every `step` px through pixels where f > level; rows alternate direction so neighbours join into one zigzag */
+  function hatch(f, w, h, level, step) {
+    const out = []; let flip = false;
+    for (let y = Math.round(step / 2); y < h; y += step) { const row = []; let x0 = -1; const yy = Math.round(y);
+      for (let x = 0; x <= w; x++) { const on = x < w && f[yy * w + x] > level; if (on && x0 < 0) x0 = x; if (!on && x0 >= 0) { if (x - x0 >= 2) row.push([{ x: x0, y: yy }, { x: x - 1, y: yy }]); x0 = -1; } }
+      if (flip) row.reverse(); for (const seg of row) out.push(flip ? seg.reverse() : seg); flip = !flip; }
+    return out;
+  }
   function trace(img, opts) {
     opts = Object.assign({ mode: 'ink', threshold: 128, invert: false, blur: true, minBlobPx: 6, prunePx: 10 }, opts || {});
     const w = img.width, h = img.height;
@@ -697,17 +737,49 @@ window.DEXARM_PEN_OFFSET=114;
     if (inkFraction > 0.35 && opts.mode !== 'edge') return { polylines: [], binary: b, skeleton: b, width: w, height: h, inkFraction };
     b = despeckle(b, w, h, opts.minBlobPx);
     const bin = b.slice();
+    // small solid blobs (pupils, dots, beauty marks) thin into a jagged knot of spurs; draw them as a dot (circle + inner circle) instead
+    const dots = [];
+    if (opts.dotMaxPx !== 0) { const maxD = opts.dotMaxPx || Math.max(8, Math.round(w * 0.02)); const lab = new Int32Array(b.length); let id = 0; const stack = [];
+      for (let i = 0; i < b.length; i++) { if (!b[i] || lab[i]) continue; id++; let area = 0, minX = w, maxX = 0, minY = h, maxY = 0, sx = 0, sy = 0; stack.push(i); lab[i] = id;
+        while (stack.length) { const j = stack.pop(); const x = j % w, y = (j - x) / w; area++; sx += x; sy += y; if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y;
+          for (const [dx, dy] of N8) { const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue; const k = yy * w + xx; if (b[k] && !lab[k]) { lab[k] = id; stack.push(k); } } }
+        const bw = maxX - minX + 1, bh = maxY - minY + 1; const solid = area / (bw * bh);
+        if (bw <= maxD && bh <= maxD && solid > 0.55 && Math.max(bw, bh) / Math.min(bw, bh) < 2.2 && area >= 9) { // compact, round-ish, filled → a dot
+          const cx = sx / area, cy = sy / area, r = Math.sqrt(area / Math.PI);
+          for (let j = 0; j < b.length; j++) if (lab[j] === id) b[j] = 0; // not for the skeletonizer
+          const circle = (rr, n) => { const pts = []; for (let k = 0; k <= n; k++) { const a = 2 * Math.PI * k / n; pts.push({ x: cx + rr * Math.cos(a), y: cy + rr * Math.sin(a) }); } return pts; };
+          dots.push(circle(Math.max(0.8, r - 1.2), 24)); if (r > 3.5) dots.push(circle(Math.max(0.6, (r - 1.2) * 0.5), 16)); if (r > 7) dots.push(circle((r - 1.2) * 0.75, 20)); } } }
+    // anything wider than the pen can cover in one pass (eyebrows, pupils, bold accents, beard shading) is drawn as its outline
+    // plus hatch fill instead of a thinned centre-line, which comes out as a wandering, spurred knot
+    let fills = [], thickMask = null;
+    if (opts.thickPx > 0) {
+      const dist = distanceTransform(b, w, h); const skel = b.slice(); thin(skel, w, h);
+      thickMask = new Uint8Array(b.length); const half = opts.thickPx / 2; let any = false;
+      for (let i = 0; i < skel.length; i++) { if (!skel[i] || dist[i] < half) continue; any = true; const r = Math.ceil(dist[i]), x = i % w, y = (i - x) / w;
+        for (let dy = -r; dy <= r; dy++) { const yy = y + dy; if (yy < 0 || yy >= h) continue; for (let dx = -r; dx <= r; dx++) { const xx = x + dx; if (xx < 0 || xx >= w) continue; if (dx * dx + dy * dy <= dist[i] * dist[i] + 1 && b[yy * w + xx]) thickMask[yy * w + xx] = 1; } } }
+      if (any) {
+        const dm = distanceTransform(thickMask, w, h); const inset = Math.max(0.6, (opts.penPx || 3) / 2); // the pen's own half-width stays inside the shape
+        for (const c of contours(dm, w, h, inset)) { c.fill = true; fills.push(c); }
+        for (const hh of hatch(dm, w, h, inset, Math.max(2, (opts.penPx || 3) * 0.85))) { hh.fill = true; fills.push(hh); }
+        for (let i = 0; i < b.length; i++) if (thickMask[i]) b[i] = 0; // the thin-line tracer only sees what's left
+      }
+    }
     thin(b, w, h);
     let polylines = skeletonToPolylines(b, w, h);
+    if (thickMask) { // a centre-line that runs into a filled region stops a pixel short of it
+      const cut = []; for (const p of polylines) { let run = []; for (const q of p) { const i = Math.round(q.y) * w + Math.round(q.x); let near = false; for (let dy = -1; dy <= 1 && !near; dy++) for (let dx = -1; dx <= 1; dx++) { const j = i + dy * w + dx; if (j >= 0 && j < b.length && thickMask[j]) { near = true; break; } }
+        if (near) { if (run.length > 1) { run.dangling = p.dangling; cut.push(run); } run = []; } else run.push(q); } if (run.length > 1) { run.dangling = p.dangling; cut.push(run); } } polylines = cut; }
+    for (const d of dots) { d.dot = true; polylines.push(d); }
+    for (const f of fills) polylines.push(f);
     // prune spurs: short branches that dangle off a longer line (thinning artifacts at every line end)
     const plen = p => { let L = 0; for (let i = 1; i < p.length; i++) L += Math.hypot(p[i].x - p[i - 1].x, p[i].y - p[i - 1].y); return L; };
     const prunePx = opts.prunePx == null ? 10 : opts.prunePx;
     const before = polylines.length;
-    polylines = polylines.filter(p => !(p.dangling && plen(p) < prunePx) );
+    polylines = polylines.filter(p => p.dot || p.fill || !(p.dangling && plen(p) < prunePx) );
     return { polylines, binary: bin, skeleton: b, width: w, height: h, inkFraction, pruned: before - polylines.length };
   }
 
-  return { trace, thin, skeletonToPolylines, toGray, threshold, despeckle, sobel };
+  return { trace, thin, skeletonToPolylines, toGray, threshold, despeckle, sobel, distanceTransform, contours, hatch };
 });
 
 </script>
@@ -915,7 +987,9 @@ window.DEXARM_PEN_OFFSET=114;
       g.push(`G0 X${f(s[0].x)} Y${f(s[0].y)} F${Math.round(o.travelSpeed)}`);
       if (first) { g.push(`G0 Z${f(o.penUpZ)} F${Math.round(o.zSpeed)}`); first = false; }
       g.push(`G1 Z${f(o.penDownZ)} F${Math.round(o.zSpeed)}`);
-      g.push(`G1 X${f(s[1].x)} Y${f(s[1].y)} F${Math.round(o.drawSpeed)}`);
+      // inside the detail zone the pen moves slower (eyes, mouth): less ringing on tight curves
+      let F = o.drawSpeed; if (o.zone && o.zoneSpeed && o.zoneSpeed < 1) { const z = o.zone; let inside = 0; for (const q of s) if (q.x >= z.minX && q.x <= z.maxX && q.y >= z.minY && q.y <= z.maxY) inside++; if (inside * 2 >= s.length) F = o.drawSpeed * o.zoneSpeed; }
+      g.push(`G1 X${f(s[1].x)} Y${f(s[1].y)} F${Math.round(F)}`);
       for (let i = 2; i < s.length; i++) g.push(`G1 X${f(s[i].x)} Y${f(s[i].y)}`);
       g.push(`G0 Z${f(o.penUpZ)} F${Math.round(o.zSpeed)}`);
     }
@@ -1128,7 +1202,7 @@ window.DEXARM_PEN_OFFSET=114;
 
   // ---------- persistence ----------
   const PERSIST = ['imgMode', 'imgThr', 'imgInv', 'imgRes', 'imgSpeck', 'imgPrune', 'imgSmooth', 'imgBlur', 'paper', 'orient', 'margin', 'paperX', 'paperY',
-    'optOrder', 'optJoin', 'optSeg', 'optTurn', 'optSimp', 'optMin', 'optMinDetail', 'optSimpDetail', 'spDraw', 'spTravel', 'spZ', 'acc', 'accT', 'jerk', 'fastTravel', 'inflight', 'zDown', 'zLift', 'zSafe', 'jogStep', 'jogSpeed', 'qPause', 'qPreview', 'qPreviewSecs', 'qSize', 'qSizeCustom', 'qPlace', 'qNames', 'qNamePos', 'qNameFont', 'qNameH'];
+    'optOrder', 'optJoin', 'optSeg', 'optTurn', 'optSimp', 'optMin', 'optMinDetail', 'optSimpDetail', 'zoneSpeed', 'imgDots', 'penW', 'fillX', 'spDraw', 'spTravel', 'spZ', 'acc', 'accT', 'jerk', 'fastTravel', 'inflight', 'zDown', 'zLift', 'zSafe', 'jogStep', 'jogSpeed', 'qPause', 'qPreview', 'qPreviewSecs', 'qSize', 'qSizeCustom', 'qPlace', 'qNames', 'qNamePos', 'qNameFont', 'qNameH'];
   // ---- which robot is this tab? (one Studio tab per arm; /studio/?bot=3 or the header dropdown) ----
   const BOT = Math.max(1, Math.min(8, +(new URLSearchParams(location.search).get('bot') || sessionStorage.getItem('dexdraw.bot') || 1)));
   try { sessionStorage.setItem('dexdraw.bot', BOT); } catch (_) { }
@@ -1213,37 +1287,44 @@ window.DEXARM_PEN_OFFSET=114;
     if (!traceSrcPromise) { const el = document.getElementById('traceSrc'); traceSrcPromise = (el && el.textContent.trim()) ? Promise.resolve(el.textContent) : fetch(el ? el.src : 'js/imagetrace.js').then(r => r.text()); }
     return traceSrcPromise;
   }
-  async function retrace(obj) {
-    obj = obj || S.selected; if (!obj || obj.kind !== 'image') return;
+  function retrace(obj) { return new Promise(resolve => retraceInner(obj, resolve)); }
+  /** retrace when the drawing's scale has changed enough that "thick" means something different (the pen width is fixed in mm) */
+  async function retraceIfScaleChanged(obj) { if (!obj || obj.kind !== 'image' || !obj.tracedMmPerPx) return; const now = obj.w / obj.sw; if (Math.abs(now / obj.tracedMmPerPx - 1) > 0.15) await retrace(obj); }
+  async function retraceInner(obj, resolve) {
+    obj = obj || S.selected; if (!obj || obj.kind !== 'image') { if (resolve) resolve(); return; }
     const img = obj.img, seq = ++traceSeq;
     const maxPx = Math.max(100, num('imgRes'));
-    const k = Math.min(1, maxPx / Math.max(img.naturalWidth, img.naturalHeight));
+    const k = Math.min(2, maxPx / Math.max(img.naturalWidth, img.naturalHeight)); // up to 2× upscale: thinning and smoothing then work at half-pixel precision
     const w = Math.max(2, Math.round(img.naturalWidth * k)), h = Math.max(2, Math.round(img.naturalHeight * k));
     const c = document.createElement('canvas'); c.width = w; c.height = h;
     const g = c.getContext('2d', { willReadFrequently: true }); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); g.drawImage(img, 0, 0, w, h);
     const data = g.getImageData(0, 0, w, h);
-    const opts = { mode: $('imgMode').value, threshold: num('imgThr'), invert: $('imgInv').checked, blur: $('imgBlur').checked, minBlobPx: num('imgSpeck'), prunePx: num('imgPrune') };
+    const up = Math.max(1, k); // pixel-sized settings are given at the image's own scale
+    const mmPerPx = (obj.w > 0 ? obj.w : 150) / w; const penPx = num('penW') / mmPerPx; const fillX = num('fillX');
+    const opts = { mode: $('imgMode').value, threshold: num('imgThr'), invert: $('imgInv').checked, blur: $('imgBlur').checked, minBlobPx: Math.round(num('imgSpeck') * up * up), prunePx: Math.round(num('imgPrune') * up), dotMaxPx: $('imgDots').checked ? Math.round(Math.max(8, w * 0.02)) : 0,
+      thickPx: fillX > 0 ? penPx * fillX : 0, penPx }; obj.tracedMmPerPx = mmPerPx;
     $('fileInfo').textContent = `${obj.name}: tracing ${w}×${h}px…`;
     if (worker) { worker.terminate(); worker = null; }
     const src = await traceSource();
-    worker = new Worker(URL.createObjectURL(new Blob([src + '\nself.onmessage=e=>{const r=ImageTrace.trace(e.data.img,e.data.opts);self.postMessage({polylines:r.polylines,inkFraction:r.inkFraction});};'], { type: 'text/javascript' })));
+    worker = new Worker(URL.createObjectURL(new Blob([src + '\nself.onmessage=e=>{const r=ImageTrace.trace(e.data.img,e.data.opts);self.postMessage({polylines:r.polylines,inkFraction:r.inkFraction,fills:r.polylines.filter(p=>p.fill).length});};'], { type: 'text/javascript' })));
     const t0 = performance.now();
     worker.onmessage = ev => {
-      if (seq !== traceSeq) return;
+      if (seq !== traceSeq) { if (resolve) resolve(); return; }
       const r = ev.data;
-      obj.raw = r.polylines; obj.polylines = r.polylines.map(p => Planner.smooth(p, num('imgSmooth'))); obj.sw = w; obj.sh = h;
+      obj.raw = r.polylines; obj.polylines = r.polylines.map(p => p.dot ? p : Planner.smooth(p, p.fill ? 2 : Math.round(num('imgSmooth') * Math.max(1, k)))); obj.sw = w; obj.sh = h;
       let info = `${obj.name}: ${w}×${h}px → ${r.polylines.length} strokes (${((performance.now() - t0) / 1000).toFixed(1)} s)`;
       if (r.inkFraction > 0.35) info += ' — ⚠ mostly solid dark area, not line art. Try "Edges (photos)" or raise the threshold.';
       else if (r.polylines.length > 15000) info += ' — ⚠ very busy; lower the working resolution or raise "drop specks".';
+      if (r.fills) info += ` · ${r.fills} filled shape${r.fills === 1 ? '' : 's'}`;
       $('fileInfo').textContent = info;
-      refresh();
+      refresh(); if (resolve) resolve();
     };
-    worker.onerror = e => { $('fileInfo').textContent = 'trace failed: ' + e.message; };
+    worker.onerror = e => { $('fileInfo').textContent = 'trace failed: ' + e.message; if (resolve) resolve(); };
     worker.postMessage({ img: { width: w, height: h, data: data.data }, opts }, [data.data.buffer]);
   }
   $('imgThr').addEventListener('input', () => { $('thrV').textContent = $('imgThr').value; });
   $('imgThr').addEventListener('change', () => retrace());
-  for (const id of ['imgMode', 'imgInv', 'imgRes', 'imgSpeck', 'imgPrune', 'imgBlur']) $(id).addEventListener('change', () => retrace());
+  for (const id of ['imgMode', 'imgInv', 'imgRes', 'imgSpeck', 'imgPrune', 'imgBlur', 'imgDots', 'penW', 'fillX']) $(id).addEventListener('change', () => retrace());
   $('imgSmooth').addEventListener('change', () => { for (const o of S.objects) if (o.raw) o.polylines = o.raw.map(p => Planner.smooth(p, num('imgSmooth'))); refresh(); });
   $('btnRetrace').addEventListener('click', () => retrace());
   $('btnDlSvg').addEventListener('click', () => {
@@ -1344,10 +1425,10 @@ window.DEXARM_PEN_OFFSET=114;
         'Max': { spDraw: 18000, spTravel: 18000, spZ: 6000, acc: 3000, accT: 3000, jerk: 15, fastTravel: false, inflight: 4, jogSpeed: 8000, zLift: 4 },
         'Rotrics Studio stock': { spDraw: 2000, spTravel: 4000, spZ: 1500, acc: 60, accT: 60, jerk: 10, fastTravel: false, inflight: 3, jogSpeed: 4000, zLift: 10 }
       }, after: () => { S.gcode = ''; updateButtons(); draw(); } },
-    conv: { fields: ['imgMode', 'imgThr', 'imgInv', 'imgRes', 'imgSpeck', 'imgSmooth', 'imgPrune', 'imgBlur', 'optOrder', 'optJoin', 'optSeg', 'optTurn', 'optSimp', 'optMin', 'optMinDetail', 'optSimpDetail'],
+    conv: { fields: ['imgMode', 'imgThr', 'imgInv', 'imgRes', 'imgSpeck', 'imgSmooth', 'imgPrune', 'imgBlur', 'imgDots', 'penW', 'fillX', 'optOrder', 'optJoin', 'optSeg', 'optTurn', 'optSimp', 'optMin', 'optMinDetail', 'optSimpDetail', 'zoneSpeed'],
       builtin: {
-        'AI line art — full figure (default)': { imgMode: 'ink', imgThr: 187, imgInv: false, imgRes: 2800, imgSpeck: 11, imgSmooth: 5, imgPrune: 4, imgBlur: false, optOrder: true, optJoin: 0.6, optSeg: 2, optTurn: 6, optSimp: 0.12, optMin: 1.5, optMinDetail: 1, optSimpDetail: 0.08 },
-        'AI line art — ultra detail (slow)': { imgMode: 'ink', imgThr: 187, imgInv: false, imgRes: 2800, imgSpeck: 9, imgSmooth: 5, imgPrune: 3, imgBlur: false, optOrder: true, optJoin: 0.6, optSeg: 1.5, optTurn: 5, optSimp: 0.1, optMin: 1.0, optMinDetail: 0.8, optSimpDetail: 0.06 },
+        'AI line art — full figure (default)': { imgMode: 'ink', imgThr: 187, imgInv: false, imgRes: 2800, imgSpeck: 11, imgSmooth: 5, imgPrune: 4, imgBlur: false, optOrder: true, optJoin: 0.6, optSeg: 2, optTurn: 6, optSimp: 0.12, optMin: 1.5, optMinDetail: 1, optSimpDetail: 0.08, imgDots: true, zoneSpeed: 60, penW: 0.5, fillX: 2 },
+        'AI line art — ultra detail (slow)': { imgMode: 'ink', imgThr: 187, imgInv: false, imgRes: 3100, imgSpeck: 9, imgSmooth: 5, imgPrune: 3, imgBlur: false, imgDots: true, optOrder: true, optJoin: 0.6, optSeg: 1.5, optTurn: 5, optSimp: 0.1, optMin: 1.0, optMinDetail: 0.8, optSimpDetail: 0.06, zoneSpeed: 50, penW: 0.5, fillX: 1.5 },
         'Line art portrait — drop hair wisps': { imgMode: 'ink', imgThr: 187, imgInv: false, imgRes: 2800, imgSpeck: 11, imgSmooth: 6, imgPrune: 4, imgBlur: false, optOrder: true, optJoin: 0.6, optSeg: 2.5, optTurn: 5, optSimp: 0.25, optMin: 8, optMinDetail: 1, optSimpDetail: 0.06 },
         'Line art — keep everything': { imgMode: 'ink', imgThr: 200, imgInv: false, imgRes: 1600, imgSpeck: 4, imgSmooth: 2, imgPrune: 16, imgBlur: false, optOrder: true, optJoin: 0.6, optSeg: 2, optTurn: 4, optSimp: 0.08, optMin: 1.5, optMinDetail: 1, optSimpDetail: 0.06 },
         'Logo / bold shapes': { imgMode: 'ink', imgThr: 160, imgInv: false, imgRes: 1600, imgSpeck: 20, imgSmooth: 3, imgPrune: 20, imgBlur: false, optOrder: true, optJoin: 1, optSeg: 3, optTurn: 6, optSimp: 0.15, optMin: 3, optMinDetail: 1, optSimpDetail: 0.08 },
@@ -1388,7 +1469,7 @@ window.DEXARM_PEN_OFFSET=114;
   for (const id of ['spDraw', 'spTravel', 'spZ', 'acc', 'accT', 'jerk', 'fastTravel', 'zLift', 'zSafe']) $(id).addEventListener('change', () => { S.gcode = ''; updateButtons(); draw(); });
 
   // ---------- gcode ----------
-  function gcodeOpts() { const zd = num('zDown'); return { drawSpeed: num('spDraw'), travelSpeed: num('spTravel'), zSpeed: num('spZ'), accel: num('acc'), travelAccel: num('accT'), jerk: num('jerk'), fastTravel: $('fastTravel').checked, penDownZ: zd, penUpZ: zd + num('zLift'), approachZ: zd + Math.max(num('zLift'), num('zSafe')) }; }
+  function gcodeOpts() { const zd = num('zDown'); const z = S.zone ? { minX: S.zone.x - S.zone.w / 2, maxX: S.zone.x + S.zone.w / 2, minY: S.zone.y - S.zone.h / 2, maxY: S.zone.y + S.zone.h / 2 } : null; return { zone: z, zoneSpeed: Math.max(0.2, Math.min(1, num('zoneSpeed') / 100)), drawSpeed: num('spDraw'), travelSpeed: num('spTravel'), zSpeed: num('spZ'), accel: num('acc'), travelAccel: num('accT'), jerk: num('jerk'), fastTravel: $('fastTravel').checked, penDownZ: zd, penUpZ: zd + num('zLift'), approachZ: zd + Math.max(num('zLift'), num('zSafe')) }; }
   function generate() { if (!S.plan || S.block) return ''; S.gcode = Planner.toGcode(S.plan, gcodeOpts()); updateButtons(); return S.gcode; }
   $('btnGen').addEventListener('click', () => { if (generate()) log(`G-code generated: ${S.gcode.split('\n').length} lines`); else log(S.block || 'nothing to generate', 'err'); });
   $('btnDl').addEventListener('click', () => { if (!S.gcode) generate(); if (S.gcode) download((S.objects[0] ? S.objects[0].name.replace(/\.[^.]+$/, '') : 'drawing') + '.gcode', S.gcode, 'text/plain'); });
@@ -1681,7 +1762,7 @@ window.DEXARM_PEN_OFFSET=114;
       await loadFromUrl(`/api/jobs/${job.id}/art`, `queue-${job.number}.png`);
       await new Promise(r => setTimeout(r, 400)); for (let i = 0; i < 100 && (S.planDirty || !S.plan); i++) await new Promise(r => setTimeout(r, 200)); // trace worker + planner
       const label = nameLabel(job.names); if (label && $('qNames').checked) { const t = textObject(label, $('qNameFont').value, num('qNameH')); S.objects.push(t); log(`name lettering: "${label}"`); }
-      applyEventSize(); for (let i = 0; i < 50 && S.planDirty; i++) await new Promise(r => setTimeout(r, 100));
+      applyEventSize(); await retraceIfScaleChanged(S.objects.find(x => x.kind === 'image')); applyEventSize(); for (let i = 0; i < 50 && S.planDirty; i++) await new Promise(r => setTimeout(r, 100));
       if (S.block) throw new Error(S.block);
       Q.loaded = job; Q.current = null; syncStep();
       $('qStatus').textContent = `#${job.number} is on the canvas — check it, then press 2 · Draw it (or ✕ Skip).`;
@@ -1769,6 +1850,10 @@ window.DEXARM_PEN_OFFSET=114;
 
   // ---------- hover help ----------
   const TIPS = {
+    penW: 'Line width of the pen you are using, in millimetres (0.5 for a standard felt tip, 0.3 for a fine liner). Decides what counts as a thick shape.',
+    fillX: 'Shapes wider than this many pen-widths are drawn as an outline filled with hatching (eyebrows, pupils, beards) instead of a single thinned line, which comes out jagged. 0 = off. 1.5–2 is a good range.',
+    imgDots: 'Small solid spots (pupils, dots, moles) are drawn as a neat filled circle instead of being thinned into a jagged knot.',
+    zoneSpeed: 'Pen speed inside the detail zone as a percentage of the draw speed. Slower = cleaner tight curves on eyes and mouths. 50–70% is a good range.',
     qNames: 'Letter the guests\' names next to the drawing with the pen (single-stroke engraving font). Names come from what they typed on the iPad; nothing is drawn if they skipped it.',
     qNamePos: 'Where the name line goes. The drawing is shrunk slightly if the drawing + name would not fit the page.',
     qNameFont: 'Clean = plain capitals/lowercase; Script = cursive; Serif = typewriter-like. All are single-line fonts made for pen plotters.',
