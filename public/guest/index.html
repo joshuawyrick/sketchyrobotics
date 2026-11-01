@@ -27,6 +27,17 @@
   .screen{display:none;flex:1;flex-direction:column;min-height:0}
   .screen.on{display:flex}
   h1{font-size:30px;margin:0 0 6px;letter-spacing:-.3px}
+  .hero{background:var(--card);border:2px solid var(--line);border-radius:22px;padding:22px 24px 20px;margin-bottom:22px;flex:0 0 auto}
+  .hero h1{font-size:40px;margin:0}.heroTitle{text-align:center;margin-bottom:16px}.heroTitle .sub{margin:4px 0 0;font-size:20px}
+  .steps{display:flex;align-items:stretch;justify-content:center;gap:10px}
+  .step{flex:1;max-width:260px;background:#f3f6fb;border-radius:18px;padding:16px 12px 14px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:6px;position:relative}
+  .step .n{position:absolute;top:-12px;left:-6px;width:34px;height:34px;border-radius:50%;background:var(--blue);color:#fff;font:800 19px/34px system-ui;text-align:center;box-shadow:0 2px 8px rgba(0,109,246,.4)}
+  .step svg{width:96px;height:96px;fill:#1f2a44;stroke:#1f2a44}.step svg .hi{fill:var(--blue);stroke:var(--blue)}
+  .step b{font-size:21px;margin-top:4px}.step span{color:var(--mut);font-size:16px;line-height:1.25}
+  .arrow{align-self:center;font-size:44px;color:var(--blue);font-weight:800;padding:0 2px}
+  .cta{margin-top:18px;text-align:center;font:800 26px system-ui;color:var(--blue);animation:bob 1.4s ease-in-out infinite}
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(5px)}}
+  @media (max-width:600px){.steps{flex-direction:column;align-items:center}.arrow{transform:rotate(90deg);padding:0}.hero h1{font-size:30px}}
   .sub{color:var(--mut);margin:0 0 20px;font-size:18px}
   .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:18px} /* 4 across in portrait; the page scrolls as the gallery grows */
   @media (orientation:landscape){.tiles{grid-template-columns:repeat(6,1fr)}}
@@ -90,7 +101,17 @@
 <main>
   <!-- 1 style -->
   <section class="screen on" id="s-theme">
-    <h1>Pick your style</h1><p class="sub">Tap a style, snap a selfie, and the robot draws you.</p>
+    <div class="hero">
+      <div class="heroTitle"><h1>Get drawn by a robot</h1><p class="sub">Three steps — about two minutes</p></div>
+      <div class="steps">
+        <div class="step"><div class="n">1</div><svg viewBox="0 0 64 64" aria-hidden="true"><rect x="8" y="10" width="20" height="20" rx="4"/><rect x="36" y="10" width="20" height="20" rx="4"/><rect x="8" y="36" width="20" height="20" rx="4"/><rect x="36" y="36" width="20" height="20" rx="4" class="hi"/></svg><b>Pick a style</b><span>Tap one of the pictures below</span></div>
+        <div class="arrow">→</div>
+        <div class="step"><div class="n">2</div><svg viewBox="0 0 64 64" aria-hidden="true"><rect x="6" y="16" width="52" height="38" rx="8"/><circle cx="32" cy="35" r="11" class="hi"/><circle cx="32" cy="35" r="5"/><rect x="22" y="8" width="20" height="10" rx="3"/></svg><b>Take a selfie</b><span>Right here on this iPad</span></div>
+        <div class="arrow">→</div>
+        <div class="step"><div class="n">3</div><svg viewBox="0 0 64 64" aria-hidden="true"><rect x="6" y="48" width="52" height="8" rx="3"/><path d="M14 48 L22 22 L40 14 L50 30 L42 48" fill="none" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/><circle cx="22" cy="22" r="5" class="hi"/><circle cx="40" cy="14" r="5" class="hi"/><path d="M44 36 l-4 12" stroke-width="5" stroke-linecap="round"/></svg><b>The robot draws you</b><span>Watch it sketch your portrait</span></div>
+      </div>
+      <div class="cta">Start here — tap a style ↓</div>
+    </div>
     <div class="tiles" id="tiles"></div>
   </section>
   <!-- 2 who -->
