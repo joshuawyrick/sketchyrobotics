@@ -58,6 +58,7 @@
   .names{display:flex;flex-direction:column;gap:16px;margin:6px 0 20px;max-width:620px}
   .nameField{display:flex;flex-direction:column;gap:6px;font-size:18px;font-weight:600}
   .nameField input{font:600 30px system-ui;padding:16px 18px;border:2px solid var(--line);border-radius:14px;background:#fff;color:var(--ink)}
+  .botTag{display:inline-block;background:var(--blue);color:#fff;font-weight:900;padding:6px 14px;border-radius:12px;font-size:26px;vertical-align:middle;letter-spacing:1px}
   .nameField input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 4px rgba(0,109,246,.18)}
   .bar{display:flex;gap:12px;margin-top:auto;padding-top:18px}
   .btn{flex:1;border:0;border-radius:14px;padding:18px;font:700 20px system-ui;cursor:pointer;background:#fff;color:var(--ink);border:2px solid var(--line)}
@@ -170,7 +171,7 @@
 
   async function loadThemes() {
     const r = await fetch('/api/themes').then(r => r.json());
-    S.themes = r.themes; $('evName').textContent = r.event || ''; S.zoom = +r.cameraZoom || 1.6; document.documentElement.style.setProperty('--zoom', S.zoom);
+    S.themes = r.themes; $('evName').textContent = r.event || ''; S.zoom = +r.cameraZoom || 1.6; S.bots = +r.bots || 1; document.documentElement.style.setProperty('--zoom', S.zoom);
     const box = $('tiles'); box.innerHTML = '';
     if (!r.themes.length) box.innerHTML = '<p class="sub">No styles are set up yet. Add one in Admin.</p>';
     for (const t of r.themes) {
@@ -300,7 +301,11 @@
     S.job = r;
     if (r.status === 'pending' || r.status === 'processing') { st.innerHTML = `<div class="spin"></div><h1>Drawing your sketch…</h1><p class="sub">You're <b>#${r.position || '?'}</b> in line. This takes about a minute.</p>`; S.pollTimer = setTimeout(poll, 2500); return; }
     if (r.status === 'failed') { st.innerHTML = `<div class="err">Sorry — that one didn't work. Please try again.<br><small>${r.error || ''}</small></div><p class="sub" id="cd"></p>`; startCountdown(15); return; }
-    st.innerHTML = `<img class="art" src="/api/jobs/${r.id}/art?v=${Date.now()}"><h1>You're #${r.number}</h1><p class="sub">${r.status === 'done' ? 'Drawn! Pick it up at the robot.' : r.status === 'drawing' ? 'The robot is drawing you right now!' : 'Watch the robot — your sketch is <b>#' + (r.position || '?') + '</b> in line.'}</p><p class="sub" id="cd"></p>`;
+    const multi = (S.bots || 1) > 1, where = r.bot ? `<span class="botTag">ROBOT ${r.bot}</span>` : '';
+    const line = r.status === 'done' ? (multi && r.bot ? `Drawn! Pick it up at ${where}` : 'Drawn! Pick it up at the robot.')
+      : r.status === 'drawing' ? (multi && r.bot ? `${where} is drawing you right now!` : 'The robot is drawing you right now!')
+      : multi ? (r.bot ? `Your sketch will be drawn at ${where} — head over there! You're <b>#${r.position || '?'}</b> in its line.` : `Your sketch is ready — the next free robot will draw it. You're <b>#${r.position || '?'}</b> in line.`) : 'Watch the robot — your sketch is <b>#' + (r.position || '?') + '</b> in line.';
+    st.innerHTML = `<img class="art" src="/api/jobs/${r.id}/art?v=${Date.now()}"><h1>You're #${r.number}</h1><p class="sub">${line}</p><p class="sub" id="cd"></p>`;
     if (!S.cdTimer) startCountdown(RESET_AFTER_ART); else { const el = $('cd'); if (el) el.textContent = S.cdText || ''; }
     if (r.status !== 'done') S.pollTimer = setTimeout(poll, 4000);
   }

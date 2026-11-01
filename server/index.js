@@ -58,7 +58,7 @@ const OPENAI_BASE = process.env.OPENAI_BASE || 'https://api.openai.com';
 
 // ---------- settings ----------
 const SETTINGS_FILE = path.join(DATA, 'settings.json');
-const DEFAULT_SETTINGS = { model: 'gpt-image-2-2026-04-21', quality: 'medium', size: '1024x1536', moderation: 'low', concurrency: 2, autoRun: true, pauseBetween: true, eventName: 'Sketchy Robotics', cameraZoom: 1.6 };
+const DEFAULT_SETTINGS = { model: 'gpt-image-2-2026-04-21', quality: 'medium', size: '1024x1536', moderation: 'low', bots: 1, concurrency: 2, autoRun: true, pauseBetween: true, eventName: 'Sketchy Robotics', cameraZoom: 1.6 };
 function getSettings() { try { return Object.assign({}, DEFAULT_SETTINGS, JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))); } catch (_) { return Object.assign({}, DEFAULT_SETTINGS); } }
 function saveSettings(s) { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2)); persist(SETTINGS_FILE); }
 
@@ -93,10 +93,19 @@ function loadState() {
   seq = Math.max(0, ...[...jobs.values()].map(j => j.number || 0));
 }
 function saveJob(j) { fs.mkdirSync(path.join(JOBS, j.id), { recursive: true }); const f = path.join(JOBS, j.id, 'job.json'); fs.writeFileSync(f, JSON.stringify(j, null, 2)); jobs.set(j.id, j); if (!j.test || j.lab) persist(f); }
-function publicJob(j) { const { id, number, status, theme, themeName, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset, names } = j; return { id, number, status, theme, themeName, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset, names }; }
+function publicJob(j) { const { id, number, status, theme, themeName, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset, names, bot } = j; return { id, number, status, theme, themeName, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset, names, bot }; }
 const cleanName = v => String(v || '').replace(/[^\p{L}\p{N} .,'&-]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 24); // letters the plotter font has
 function sortedJobs() { return [...jobs.values()].sort((a, b) => (a.priority || 0) - (b.priority || 0) || a.createdAt - b.createdAt); }
 function queuePosition(id) { let n = 0; for (const j of sortedJobs()) { if (['pending', 'processing', 'ready', 'drawing'].includes(j.status)) { n++; if (j.id === id) return n; } } return null; }
+
+// ---------- robots (one Plotter Studio tab per arm) ----------
+const bots = new Map(); // bot number -> { bot, connected, status, jobId, number, progress, seen }
+const botCount = () => Math.max(1, Math.min(8, +getSettings().bots || 1));
+const liveBots = () => [...bots.values()].filter(b => Date.now() - b.seen < 30000 && b.connected && b.bot <= botCount());
+function botLoad(n) { let c = 0; for (const j of jobs.values()) if (j.bot === n && (j.status === 'ready' || j.status === 'drawing')) c++; return c; }
+/** when a sketch becomes ready: hand it to the live robot with the least waiting; none live → unassigned (first tab to claim takes it) */
+function assignBot(job) { if (botCount() <= 1) { job.bot = 1; return; } const live = liveBots(); if (!live.length) { job.bot = null; return; } live.sort((a, b) => botLoad(a.bot) - botLoad(b.bot) || a.bot - b.bot); job.bot = live[0].bot; }
+const botStale = n => { const b = bots.get(n); return !b || Date.now() - b.seen > 60000 || !b.connected; };
 
 // ---------- OpenAI ----------
 /** Settings ← theme override ← this combination's override ← an explicit pick (Lab) */
@@ -140,7 +149,7 @@ async function pump() {
   while (running < (s.concurrency || 1)) {
     const next = sortedJobs().find(j => j.status === 'pending'); if (!next) return;
     next.status = 'processing'; next.attempts = (next.attempts || 0) + 1; next.startedAt = Date.now(); saveJob(next); running++;
-    generateArt(next).then(() => { next.status = 'ready'; next.readyAt = Date.now(); next.error = null; })
+    generateArt(next).then(() => { next.status = 'ready'; next.readyAt = Date.now(); next.error = null; assignBot(next); })
       .catch(e => { next.status = next.attempts >= 2 ? 'failed' : 'pending'; next.error = String(e.message || e) + (e.cause ? ' (' + (e.cause.code || e.cause.message) + ')' : ''); console.error('job', next.number, next.error); })
       .finally(() => { saveJob(next); running--; setTimeout(pump, next.status === 'pending' ? 5000 : 50); });
   }
@@ -192,7 +201,7 @@ app.post('/api/phone/:code/photo', upload.single('photo'), async (req, res) => {
 app.get('/api/phone/:code/photo', (req, res) => { const v = phoneCodes.get(req.params.code); if (!v || !v.photo) return res.status(404).end(); res.setHeader('content-type', 'image/jpeg'); res.setHeader('cache-control', 'no-store'); res.send(v.photo); });
 
 // ----- public (guest) -----
-app.get('/api/themes', (req, res) => res.json({ themes: listThemes().filter(t => t.enabled).map(t => ({ slug: t.slug, name: t.name, hasThumb: t.hasThumb, variants: VARIANTS.filter(v => t.prompts[v].trim()) })), variants: VARIANT_LABELS, event: getSettings().eventName, cameraZoom: getSettings().cameraZoom }));
+app.get('/api/themes', (req, res) => res.json({ themes: listThemes().filter(t => t.enabled).map(t => ({ slug: t.slug, name: t.name, hasThumb: t.hasThumb, variants: VARIANTS.filter(v => t.prompts[v].trim()) })), variants: VARIANT_LABELS, event: getSettings().eventName, cameraZoom: getSettings().cameraZoom, bots: botCount() }));
 app.get('/api/themes/:slug/thumb', (req, res) => { const f = path.join(THEMES, slugify(req.params.slug), 'thumb.png'); if (fs.existsSync(f)) res.sendFile(f); else res.status(404).end(); });
 app.post('/api/jobs', upload.single('photo'), async (req, res) => {
   try {
@@ -214,11 +223,15 @@ app.get('/api/jobs/:id', (req, res) => { const j = jobs.get(req.params.id); if (
 app.get('/api/jobs/:id/art', async (req, res) => { const f = path.join(JOBS, req.params.id, req.query.thumb ? 'art-thumb.png' : 'art.png'); if (await ensureLocal(f)) res.sendFile(f); else res.status(404).end(); });
 
 // ----- operator (studio) — unauthenticated on purpose: it only reads art and reports progress; the laptop is yours -----
-app.get('/api/queue', (req, res) => { res.json({ settings: getSettings(), jobs: sortedJobs().filter(j => !j.test && !['done', 'skipped', 'archived'].includes(j.status)).map(publicJob), done: sortedJobs().filter(j => j.status === 'done').slice(-10).map(publicJob) }); });
-app.post('/api/queue/claim', (req, res) => { // next ready -> drawing
-  const j = sortedJobs().find(j => j.status === 'ready'); if (!j) return res.json({ job: null });
-  j.status = 'drawing'; j.drawStartedAt = Date.now(); saveJob(j); res.json({ job: publicJob(j) });
+app.get('/api/queue', (req, res) => { res.json({ settings: getSettings(), bots: botList(), jobs: sortedJobs().filter(j => !j.test && !['done', 'skipped', 'archived'].includes(j.status)).map(publicJob), done: sortedJobs().filter(j => j.status === 'done').slice(-10).map(publicJob) }); });
+app.post('/api/queue/claim', (req, res) => { // next ready -> drawing. Mine first, then unassigned, then jobs whose robot has gone quiet
+  const bot = Math.max(1, +(req.body && req.body.bot) || 1); const ready = sortedJobs().filter(j => j.status === 'ready');
+  const j = ready.find(j => j.bot === bot) || ready.find(j => !j.bot || j.bot > botCount()) || ready.find(j => botStale(j.bot)); if (!j) return res.json({ job: null });
+  j.status = 'drawing'; j.bot = bot; j.drawStartedAt = Date.now(); saveJob(j); res.json({ job: publicJob(j) });
 });
+app.post('/api/bots/heartbeat', (req, res) => { const b = req.body || {}; const n = Math.max(1, Math.min(8, +b.bot || 1)); bots.set(n, { bot: n, connected: !!b.connected, status: String(b.status || '').slice(0, 80), jobId: b.jobId || null, number: b.number || null, progress: +b.progress || 0, seen: Date.now() }); res.json({ ok: true, bots: botList() }); });
+function botList() { const n = botCount(); const out = []; for (let i = 1; i <= n; i++) { const b = bots.get(i); out.push(b && Date.now() - b.seen < 30000 ? Object.assign({ live: true, waiting: botLoad(i) }, b) : { bot: i, live: false, connected: false, status: 'no Studio tab open', waiting: botLoad(i) }); } return out; }
+app.get('/api/bots', (req, res) => res.json({ bots: botList(), count: botCount() }));
 app.post('/api/queue/claim-id/:id', (req, res) => { const j = jobs.get(req.params.id); if (!j) return res.status(404).end(); j.status = 'drawing'; j.drawStartedAt = j.drawStartedAt || Date.now(); saveJob(j); res.json({ job: publicJob(j) }); }); // resume after a reload
 app.post('/api/jobs/:id/status', (req, res) => { const j = jobs.get(req.params.id); if (!j) return res.status(404).end(); const st = String(req.body.status); if (!['done', 'ready', 'skipped', 'failed'].includes(st)) return res.status(400).end(); j.status = st; if (st === 'done') j.doneAt = Date.now(); if (req.body.error) j.error = String(req.body.error); else if (st === 'done') j.error = null;
   for (const k of ['drawSeconds', 'strokes', 'widthMm']) if (req.body[k] != null && isFinite(+req.body[k])) j[k] = Math.round(+req.body[k] * 10) / 10; if (req.body.preset) j.preset = String(req.body.preset).slice(0, 60); // draw-time log
@@ -227,7 +240,7 @@ app.post('/api/jobs/:id/status', (req, res) => { const j = jobs.get(req.params.i
 // ----- admin -----
 app.post('/api/admin/login', (req, res) => { if ((req.body.password || '') === ADMIN_PASSWORD) res.json({ ok: true, token: ADMIN_PASSWORD }); else res.status(401).json({ error: 'wrong password' }); });
 app.get('/api/admin/state', adminAuth, (req, res) => res.json({ settings: getSettings(), themes: listThemes(), variants: VARIANT_LABELS, variantOrder: VARIANTS, jobs: sortedJobs().filter(j => !j.test).slice(-200).map(j => Object.assign(publicJob(j), { guestName: j.guestName, priority: j.priority })), hasKey: !!OPENAI_KEY, durable: !!bucket, readOnly: !!bucket && !IS_DEPLOYMENT }));
-app.post('/api/admin/settings', adminAuth, (req, res) => { const body = req.body || {}; const allowed = ['model', 'quality', 'size', 'moderation', 'concurrency', 'eventName', 'cameraZoom']; const s = getSettings(); for (const k of allowed) if (k in body) s[k] = body[k]; saveSettings(s); res.json(Object.assign({ ok: true, durable: !!bucket && IS_DEPLOYMENT }, s)); });
+app.post('/api/admin/settings', adminAuth, (req, res) => { const body = req.body || {}; const allowed = ['model', 'quality', 'size', 'moderation', 'concurrency', 'eventName', 'cameraZoom', 'bots']; const s = getSettings(); for (const k of allowed) if (k in body) s[k] = body[k]; saveSettings(s); res.json(Object.assign({ ok: true, durable: !!bucket && IS_DEPLOYMENT }, s)); });
 app.post('/api/admin/themes', adminAuth, (req, res) => { const name = String(req.body.name || '').trim(); if (!name) return res.status(400).json({ error: 'name required' }); let slug = slugify(name); if (readTheme(slug)) slug += '-' + Date.now().toString(36); writeTheme(slug, { name, enabled: true, order: listThemes().length + 1, prompts: {} }); res.json(readTheme(slug)); });
 app.put('/api/admin/themes/:slug', adminAuth, (req, res) => { const t = readTheme(slugify(req.params.slug)); if (!t) return res.status(404).end(); writeTheme(t.slug, Object.assign(t, req.body, { prompts: Object.assign(t.prompts, req.body.prompts || {}), variantModels: Object.assign(t.variantModels, req.body.variantModels || {}) })); res.json(readTheme(t.slug)); });
 app.delete('/api/admin/themes/:slug', adminAuth, (req, res) => { const d = path.join(THEMES, slugify(req.params.slug)); if (fs.existsSync(d)) { fs.rmSync(d, { recursive: true }); unpersist(d); } res.json({ ok: true }); });
@@ -292,7 +305,8 @@ app.post('/api/admin/jobs/:id', adminAuth, (req, res) => { // actions: retry, fr
   else if (a === 'front') { j.priority = -Date.now(); }
   else if (a === 'skip') { j.status = 'skipped'; }
   else if (a === 'archive') { j.status = 'archived'; } // out of every list, photo + art kept
-  else if (a === 'requeue') { j.status = (j.readyAt || fs.existsSync(path.join(JOBS, j.id, 'art.png'))) ? 'ready' : 'pending'; }
+  else if (a === 'assign') { j.bot = Math.max(0, Math.min(8, +req.body.bot || 0)) || null; } // move a sketch to another robot (0 = whichever is free)
+  else if (a === 'requeue') { j.status = (j.readyAt || fs.existsSync(path.join(JOBS, j.id, 'art.png'))) ? 'ready' : 'pending'; if (j.status === 'ready') assignBot(j); }
   else if (a === 'delete') { jobs.delete(j.id); fs.rmSync(path.join(JOBS, j.id), { recursive: true, force: true }); unpersist(path.join(JOBS, j.id)); return res.json({ ok: true }); }
   saveJob(j); pump(); res.json(publicJob(j));
 });

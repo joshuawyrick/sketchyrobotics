@@ -23,6 +23,7 @@
   .theme{border:1px solid var(--line);border-radius:12px;overflow:hidden;cursor:pointer;background:#fff;text-align:center}.theme img,.theme .ph{width:100%;aspect-ratio:1;object-fit:contain;background:#fff;display:block}.theme .ph{display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:40px}.theme .nm{padding:8px;font-weight:700}.theme.off{opacity:.5}
   .theme.on{outline:3px solid var(--blue)}
   .row{display:flex;gap:10px;align-items:center;margin:8px 0;flex-wrap:wrap}.row label{min-width:170px;color:var(--mut)}
+  .botStrip{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}.botCard{flex:1;min-width:120px;border:2px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12.5px;display:flex;flex-direction:column;gap:2px;opacity:.7}.botCard b{color:var(--c);font-size:14px}.botCard.on{opacity:1;border-color:var(--c)}
   .labGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-top:12px}
   .lab{border:1px solid var(--line);border-radius:12px;background:#fff;overflow:hidden;display:flex;flex-direction:column}.lab img{width:100%;aspect-ratio:2/3;object-fit:contain;background:#fff;display:block}.lab .b{padding:8px 10px;font-size:12.5px;display:flex;flex-direction:column;gap:6px}.lab .m{font-weight:700}.lab .p{color:var(--mut);max-height:3.9em;overflow:hidden;white-space:pre-wrap}.lab.applied{outline:3px solid #1a9c4c}.lab .fail{padding:14px;color:#b51f33;font-size:12.5px}
   .modelBoxes{display:flex;flex-wrap:wrap;gap:6px 14px}.modelBoxes label{display:flex;gap:6px;align-items:center;font-size:13px;white-space:nowrap}
@@ -55,8 +56,9 @@
         <label class="note" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="showArchived"> Show archived</label>
         <a id="csvLink" href="#"><button>Download draw log (CSV)</button></a>
       </div>
+      <div id="botStrip" class="botStrip" style="display:none"></div>
       <div class="note" id="drawStats" style="margin-bottom:8px"></div>
-      <table><thead><tr><th><input type="checkbox" id="selAll" title="Select all shown"></th><th>#</th><th>Photo</th><th>Line art</th><th>Style</th><th>Status</th><th>Taken</th><th>Draw time</th><th></th></tr></thead><tbody id="qbody"></tbody></table>
+      <table><thead><tr><th><input type="checkbox" id="selAll" title="Select all shown"></th><th>#</th><th>Photo</th><th>Line art</th><th>Style</th><th>Status</th><th>Robot</th><th>Taken</th><th>Draw time</th><th></th></tr></thead><tbody id="qbody"></tbody></table>
       <p class="note">Archived entries leave every list but keep the photo and line art (tick "Show archived" to see them, download them, or put them back in the queue). Delete removes the files for good.</p></div>
   </section>
 
@@ -105,6 +107,7 @@
       <div class="row"><label>Quality</label><select id="sQuality" style="max-width:200px"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="auto">auto</option></select></div>
       <div class="row"><label>Output size</label><select id="sSize" style="max-width:200px"><option value="1024x1536">1024×1536 portrait</option><option value="1024x1024">1024×1024 square</option><option value="1536x1024">1536×1024 landscape</option><option value="auto">auto</option></select></div>
       <div class="row"><label>Content moderation</label><select id="sMod" style="max-width:200px"><option value="low">low (less restrictive) — default</option><option value="auto">auto (OpenAI's standard filter)</option></select><span class="note">"low" loosens the image filter for themes like zombies or horror; outright refusals still come back as a failed job with the reason.</span></div>
+      <div class="row"><label>Robots at this event</label><input id="sBots" type="number" min="1" max="8" step="1" style="max-width:100px"><span class="note">One Plotter Studio tab per robot (open /studio/?bot=2, ?bot=3…). Sketches are handed to the robot with the least waiting, and the iPad tells the guest which robot to go to.</span></div>
       <div class="row"><label>Photos processed at once</label><input type="number" id="sConc" min="1" max="5" style="max-width:100px"></div>
     </div>
     <div class="card"><h2>Event</h2>
@@ -139,7 +142,11 @@
   const fmtS = sec => sec ? `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}` : '';
   const SEL = new Set();
   function syncSel() { const n = SEL.size; for (const id of ['bArchive', 'bRequeue', 'bDelete']) $(id).disabled = !n; $('selNote').textContent = n ? `${n} selected` : ''; }
+  const BOT_COLORS = ['#006df6', '#d7263d', '#1a9c4c', '#e67e22', '#8e44ad', '#0097a7', '#c2185b', '#5d4037'];
+  async function renderBots() { const n = +STATE.settings.bots || 1; const strip = $('botStrip'); if (n <= 1) { strip.style.display = 'none'; return; } let list = []; try { list = (await api('/api/bots')).bots; } catch (_) { } strip.style.display = '';
+    strip.innerHTML = list.map(b => `<div class="botCard ${b.live && b.connected ? 'on' : ''}" style="--c:${BOT_COLORS[(b.bot - 1) % BOT_COLORS.length]}"><b>Bot ${b.bot}</b><span>${b.live ? (b.connected ? (b.status === 'drawing' && b.number ? `drawing #${b.number} · ${Math.round(b.progress)}%` : b.status) : 'tab open, arm not connected') : 'no Studio tab open'}</span><span class="note">${b.waiting} waiting</span></div>`).join(''); }
   function renderQueue() {
+    renderBots();
     const all = STATE.jobs.filter(j => !j.id.startsWith('test-')).slice().reverse();
     const js = $('showArchived').checked ? all : all.filter(j => j.status !== 'archived');
     const counts = {}; for (const j of all) counts[j.status] = (counts[j.status] || 0) + 1;
@@ -154,6 +161,7 @@
       <td>${['ready', 'drawing', 'done', 'skipped', 'archived'].includes(j.status) ? `<a href="/api/jobs/${j.id}/art" target="_blank"><img src="/api/jobs/${j.id}/art?thumb=1"></a>` : ''}</td>
       <td>${j.themeName}<br><span class="note">${STATE.variants[j.variant] || j.variant}</span>${j.names ? `<br><b>${[j.names.a, j.names.b, j.names.pet].filter(Boolean).join(' & ')}</b>` : ''}</td>
       <td><span class="pill ${j.status}">${j.status}</span>${j.error ? `<br><span class="bad note">${j.error}</span>` : ''}</td>
+      <td>${(STATE.settings.bots || 1) > 1 ? (j.status === 'ready' ? `<select data-assign="${j.id}" style="width:auto">${['<option value="0">any</option>'].concat(Array.from({ length: +STATE.settings.bots }, (_, i) => `<option value="${i + 1}" ${j.bot === i + 1 ? 'selected' : ''}>Bot ${i + 1}</option>`)).join('')}</select>` : (j.bot ? 'Bot ' + j.bot : '')) : ''}</td>
       <td class="note">${fmt(j.createdAt)}</td>
       <td class="note" style="white-space:nowrap">${j.drawSeconds ? `<b>${fmtS(j.drawSeconds)}</b><br>${j.widthMm ? (j.widthMm / 25.4).toFixed(1) + ' in · ' : ''}${j.strokes || ''} strokes${j.preset ? '<br>' + j.preset : ''}` : ''}</td>
       <td style="white-space:nowrap">
@@ -165,6 +173,7 @@
         <button data-a="delete" data-id="${j.id}" class="danger">✕</button>
       </td></tr>`).join('');
     $('qbody').querySelectorAll('button[data-a]').forEach(b => b.onclick = async () => { if (b.dataset.a === 'delete' && !confirm('Delete this entry?')) return; await api('/api/admin/jobs/' + b.dataset.id, { method: 'POST', json: { action: b.dataset.a } }); refresh(); toast({ retry: 'Re-generating', front: 'Moved to front of the line', skip: 'Skipped', requeue: 'Back in the robot queue', delete: 'Deleted', archive: 'Archived — photo and line art kept' }[b.dataset.a] || 'Done'); });
+    $('qbody').querySelectorAll('select[data-assign]').forEach(sel => sel.onchange = async () => { await api('/api/admin/jobs/' + sel.dataset.assign, { method: 'POST', json: { action: 'assign', bot: +sel.value } }); toast(+sel.value ? 'Moved to Bot ' + sel.value : 'Any free robot will take it'); refresh(); });
     $('qbody').querySelectorAll('.selRow').forEach(c => c.onchange = () => { if (c.checked) SEL.add(c.dataset.id); else SEL.delete(c.dataset.id); syncSel(); });
     $('selAll').checked = js.length > 0 && js.every(j => SEL.has(j.id)); syncSel();
   }
@@ -255,8 +264,8 @@
   async function loadModels(show) { try { const r = await api('/api/admin/models'); MODELS = Array.isArray(r.models) && r.models.length ? r.models : KNOWN_MODELS; fillModels(); if (show) $('tMsg').textContent = r.models.length + ' image models available'; } catch (e) { if (show) $('tMsg').textContent = e.message; } }
   $('tModels').onclick = async () => { $('tModels').disabled = true; await loadModels(true); $('tModels').disabled = false; };
   // ----- settings -----
-  function renderSettings() { const s = STATE.settings; $('durState').innerHTML = STATE.readOnly ? '<span class="bad">⚠ dev workspace — changes here are NOT saved to the live app</span>' : STATE.durable ? '<span class="ok">✓ bucket connected — saved settings and themes persist across redeploys</span>' : '<span class="bad">✗ local disk only</span>'; $('keyState').innerHTML = STATE.hasKey ? '<span class="ok">✓ set</span>' : '<span class="bad">✗ missing</span>'; fillModels(); $('sQuality').value = s.quality; $('sSize').value = s.size; $('sMod').value = s.moderation || 'low'; $('sConc').value = s.concurrency; $('sEvent').value = s.eventName || ''; $('sZoom').value = s.cameraZoom || 1.6; }
-  $('sSave').onclick = async () => { await api('/api/admin/settings', { method: 'POST', json: { model: $('sModel').value, quality: $('sQuality').value, size: $('sSize').value, moderation: $('sMod').value, concurrency: +$('sConc').value || 1, eventName: $('sEvent').value, cameraZoom: Math.min(3, Math.max(1, +$('sZoom').value || 1.6)) } }); $('sMsg').textContent = 'Saved ✓'; toast(STATE.readOnly ? 'Saved on this test server only — not the live app' : 'Settings saved', STATE.readOnly ? 'bad' : 'ok'); setTimeout(() => $('sMsg').textContent = '', 4000); };
+  function renderSettings() { const s = STATE.settings; $('durState').innerHTML = STATE.readOnly ? '<span class="bad">⚠ dev workspace — changes here are NOT saved to the live app</span>' : STATE.durable ? '<span class="ok">✓ bucket connected — saved settings and themes persist across redeploys</span>' : '<span class="bad">✗ local disk only</span>'; $('keyState').innerHTML = STATE.hasKey ? '<span class="ok">✓ set</span>' : '<span class="bad">✗ missing</span>'; fillModels(); $('sQuality').value = s.quality; $('sSize').value = s.size; $('sMod').value = s.moderation || 'low'; $('sBots').value = s.bots || 1; $('sConc').value = s.concurrency; $('sEvent').value = s.eventName || ''; $('sZoom').value = s.cameraZoom || 1.6; }
+  $('sSave').onclick = async () => { await api('/api/admin/settings', { method: 'POST', json: { model: $('sModel').value, quality: $('sQuality').value, size: $('sSize').value, moderation: $('sMod').value, bots: Math.max(1, Math.min(8, +$('sBots').value || 1)), concurrency: +$('sConc').value || 1, eventName: $('sEvent').value, cameraZoom: Math.min(3, Math.max(1, +$('sZoom').value || 1.6)) } }); $('sMsg').textContent = 'Saved ✓'; toast(STATE.readOnly ? 'Saved on this test server only — not the live app' : 'Settings saved', STATE.readOnly ? 'bad' : 'ok'); setTimeout(() => $('sMsg').textContent = '', 4000); };
   if (TOKEN) refresh(); else showLogin();
   setInterval(() => { if (TOKEN && $('tab-queue').classList.contains('on')) refresh(); }, 5000);
 })();

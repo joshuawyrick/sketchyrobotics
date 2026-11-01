@@ -60,6 +60,9 @@
   .note{font-size:11.5px;color:var(--mut);margin:4px 0}
   .warn{background:#fff4d6;border:1px solid #e6c36a;color:#6b4e00;padding:8px 10px;border-radius:6px;font-size:12.5px;margin-bottom:8px}
   .pill{display:inline-block;font:11px var(--mono);padding:1px 6px;border-radius:10px;background:#e9eef7;color:var(--mut);margin-left:6px}
+  .botBadge{font:900 16px/1 system-ui;color:#fff;background:#006df6;padding:6px 10px;border-radius:8px;letter-spacing:1px;margin-left:8px}
+  .botStrip{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}.botCard{flex:1;min-width:90px;border:2px solid var(--line);border-radius:8px;padding:5px 7px;font-size:11.5px;display:flex;flex-direction:column;gap:2px;opacity:.75}.botCard b{color:var(--c)}.botCard.on{opacity:1;border-color:var(--c)}.botCard.me{background:#f3f7ff;box-shadow:0 0 0 2px var(--c) inset}
+  .qItem.other{opacity:.55}
   .qCur{display:flex;align-items:center;gap:10px;border:2px solid var(--acc);border-radius:10px;padding:6px 8px;background:#eaf2ff;margin-bottom:8px}.qCur img{height:64px;width:64px;object-fit:contain;background:#fff;border-radius:6px}.qCur b{font-size:14px}
   button.big{font-size:15px;padding:10px 16px}
   .qList{display:flex;flex-direction:column;gap:6px;margin-top:8px;max-height:260px;overflow:auto}.qItem{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:8px;padding:4px 6px;background:#fff}.qItem img{height:44px;width:44px;object-fit:contain;background:#fff;border-radius:4px}.qItem>div{flex:1;font-size:12.5px}.qItem.drawing{border-color:var(--acc);background:#eaf2ff}.qItem button{padding:2px 7px;min-height:0;font-size:12px}
@@ -93,11 +96,11 @@
     <path d="M343.28 504.5 L341.5 506.99 L339.5 507.8 L262.5 504.35 L183.5 501.57 L67.5 496.76 L65.5 496.41 L64.08 495.5 L63.29 494.5 L62.82 492.5 L62.86 489.5 L63.5 487.86 L65.5 486.23 L67.5 485.9 L109.5 483.83 L220.5 476.28 L230.5 475.93 L263.5 473.39 L332.5 469.39 L340.5 469.53 L342.5 470.88 L343.4 472.5 Z" fill="#006df6"/>
     <path d="M1640.12 474.5 L1640.46 472.5 L1642.5 470.35 L1644.5 470 L1650.5 470.12 L1819.5 480.31 L1872.5 483.86 L1915.5 485.97 L1917.5 486.42 L1918.97 487.5 L1920.02 489.5 L1919.79 493.5 L1919.2 494.5 L1917.5 495.99 L1916.5 496.36 L1890.5 496.98 L1865.5 498.35 L1840.5 499.1 L1749.5 503.01 L1718.5 504.79 L1680.5 506.13 L1650.5 507.86 L1643.5 507.92 L1641.5 506.67 L1640.2 504.5 Z" fill="#006df6"/>
   </g>
-  </svg><span class="sub">Plotter Studio</span>
+  </svg><span class="sub">Plotter Studio</span><span id="botBadge" class="botBadge" style="display:none">BOT 1</span><select id="botSel" style="display:none;width:auto" title="Which robot this tab controls (one tab per robot)"></select>
   <span class="pill" id="fw">not connected</span>
   <span id="blockMsg" style="font-size:12px;color:#ffb4b4"></span><span class="sp"></span>
   <span id="status">no arm connected</span>
-  <button id="btnConnect" class="primary">Connect arm</button>
+  <button id="btnConnect" class="primary">Connect arm</button><button id="btnIdentify" title="Nod the arm twice so you can tell which robot this tab controls">Identify</button>
   <button id="btnDisconnect" style="display:none">Disconnect</button>
 </header>
 <main>
@@ -207,6 +210,7 @@
     <section>
       <h2>Event queue <span class="note" id="qSum" style="margin-left:auto"></span></h2>
       <div class="body">
+        <div id="botStrip" class="botStrip" style="display:none"></div>
         <div class="note" id="resumeBox" style="display:none;border:2px solid var(--acc);border-radius:10px;padding:8px 10px;margin-bottom:8px;background:#eaf2ff;color:var(--ink)"></div>
         <div class="qCur" id="qCur" style="display:none"><img id="qCurImg" alt=""><div><b id="qCurName"></b><div class="note" id="qCurNote"></div></div></div>
         <div class="btns"><button id="btnQNext" class="primary big">1 · Load next sketch</button><button id="btnQDraw" class="primary big" style="display:none">2 · Draw it</button><button id="btnQContinue" class="primary big" style="display:none">Continue →</button><button id="btnQSkipCur" class="danger">✕ Skip</button></div>
@@ -1125,8 +1129,13 @@ window.DEXARM_PEN_OFFSET=114;
   // ---------- persistence ----------
   const PERSIST = ['imgMode', 'imgThr', 'imgInv', 'imgRes', 'imgSpeck', 'imgPrune', 'imgSmooth', 'imgBlur', 'paper', 'orient', 'margin', 'paperX', 'paperY',
     'optOrder', 'optJoin', 'optSeg', 'optTurn', 'optSimp', 'optMin', 'optMinDetail', 'optSimpDetail', 'spDraw', 'spTravel', 'spZ', 'acc', 'accT', 'jerk', 'fastTravel', 'inflight', 'zDown', 'zLift', 'zSafe', 'jogStep', 'jogSpeed', 'qPause', 'qPreview', 'qPreviewSecs', 'qSize', 'qSizeCustom', 'qPlace', 'qNames', 'qNamePos', 'qNameFont', 'qNameH'];
-  function saveSettings() { try { const o = {}; for (const id of PERSIST) { const e = $(id); o[id] = e.type === 'checkbox' ? e.checked : e.value; } localStorage.setItem('dexdraw.settings.v9', JSON.stringify(o)); } catch (_) { } }
-  function loadSettings() { try { const o = JSON.parse(localStorage.getItem('dexdraw.settings.v9') || '{}'); for (const id of PERSIST) if (id in o) { const e = $(id); if (e.type === 'checkbox') e.checked = !!o[id]; else e.value = o[id]; } } catch (_) { } }
+  // ---- which robot is this tab? (one Studio tab per arm; /studio/?bot=3 or the header dropdown) ----
+  const BOT = Math.max(1, Math.min(8, +(new URLSearchParams(location.search).get('bot') || sessionStorage.getItem('dexdraw.bot') || 1)));
+  try { sessionStorage.setItem('dexdraw.bot', BOT); } catch (_) { }
+  const K = name => name + (BOT > 1 ? '.bot' + BOT : ''); // per-robot storage keys: pen height, paper centre, last USB port… stay with the robot
+  const BOT_COLORS = ['#006df6', '#d7263d', '#1a9c4c', '#e67e22', '#8e44ad', '#0097a7', '#c2185b', '#5d4037'];
+  function saveSettings() { try { const o = {}; for (const id of PERSIST) { const e = $(id); o[id] = e.type === 'checkbox' ? e.checked : e.value; } localStorage.setItem(K('dexdraw.settings.v9'), JSON.stringify(o)); } catch (_) { } }
+  function loadSettings() { try { const o = JSON.parse(localStorage.getItem(K('dexdraw.settings.v9')) || '{}'); for (const id of PERSIST) if (id in o) { const e = $(id); if (e.type === 'checkbox') e.checked = !!o[id]; else e.value = o[id]; } } catch (_) { } }
   loadSettings();
   const num = id => parseFloat($(id).value) || 0;
 
@@ -1389,7 +1398,7 @@ window.DEXARM_PEN_OFFSET=114;
   function guard(fn) { return async () => { if (!link.connected) { log('connect the arm first', 'err'); return; } if (S.running) { log('busy drawing', 'err'); return; } try { await fn(); } catch (e) { log(e.message, 'err'); } }; }
   async function connectArm(port) { // port = a previously approved port (auto-reconnect) or null to show the picker
     try { await link.connect(115200, port); } catch (e) { if (!port) log('connect failed: ' + e.message, 'err'); return false; }
-    try { const i = link.port.getInfo ? link.port.getInfo() : {}; localStorage.setItem('dexdraw.lastPort', JSON.stringify({ v: i.usbVendorId, p: i.usbProductId })); localStorage.setItem('dexdraw.autoConnect', '1'); } catch (_) { }
+    try { const i = link.port.getInfo ? link.port.getInfo() : {}; const ports = await DexSerial.granted(); localStorage.setItem(K('dexdraw.lastPort'), JSON.stringify({ v: i.usbVendorId, p: i.usbProductId, idx: ports.indexOf(link.port) })); localStorage.setItem(K('dexdraw.autoConnect'), '1'); } catch (_) { }
     try { const v = await link.query('M2010', /V?\d+\.\d+/i, 2500); $('fw').textContent = 'fw ' + (v.match(/V?\d+(\.\d+)+/i) || [v])[0]; } catch (_) { $('fw').textContent = 'connected'; }
     await link.send('M888 P0').catch(() => { });
     await link.send('M400').catch(() => { }); await link.send('M114').catch(() => { });
@@ -1397,16 +1406,19 @@ window.DEXARM_PEN_OFFSET=114;
   }
   // Reconnect without the picker after a page reload (Chrome keeps the USB approval); the arm keeps its position, so no re-homing needed.
   async function autoReconnect(why) {
-    if (!DexSerial.supported() || link.connected || localStorage.getItem('dexdraw.autoConnect') !== '1') return;
+    if (!DexSerial.supported() || link.connected || localStorage.getItem(K('dexdraw.autoConnect')) !== '1') return;
     const ports = await DexSerial.granted(); if (!ports.length) return;
-    let last = {}; try { last = JSON.parse(localStorage.getItem('dexdraw.lastPort') || '{}'); } catch (_) { }
-    const match = ports.find(p => { const i = p.getInfo ? p.getInfo() : {}; return i.usbVendorId === last.v && i.usbProductId === last.p; }) || (ports.length === 1 ? ports[0] : null);
-    if (!match) return;
+    let last = {}; try { last = JSON.parse(localStorage.getItem(K('dexdraw.lastPort')) || '{}'); } catch (_) { }
+    // several identical arms look the same to the browser, so each robot tab remembers its position in the approved-port list
+    const same = ports.filter(p => { const i = p.getInfo ? p.getInfo() : {}; return i.usbVendorId === last.v && i.usbProductId === last.p; });
+    const match = (last.idx != null && ports[last.idx] && same.includes(ports[last.idx])) ? ports[last.idx] : (same.length === 1 ? same[0] : ports.length === 1 ? ports[0] : null);
+    if (!match) { log('several arms are approved in this browser — press Connect and pick the one for Bot ' + BOT, 'err'); return; }
     log('reconnecting to the arm' + (why ? ' (' + why + ')' : '') + '…');
     if (!(await connectArm(match))) log('auto-reconnect failed — unplug/replug the USB or press Connect', 'err');
   }
   $('btnConnect').addEventListener('click', () => connectArm(null));
-  $('btnDisconnect').addEventListener('click', () => { localStorage.setItem('dexdraw.autoConnect', '0'); link.disconnect(); });
+  $('btnDisconnect').addEventListener('click', () => { localStorage.setItem(K('dexdraw.autoConnect'), '0'); link.disconnect(); });
+  $('btnIdentify').addEventListener('click', guard(async () => { log('identify: Bot ' + BOT + ' nods twice'); await link.send('G91'); for (let i = 0; i < 2; i++) { await link.send('G0 Z15 F2000'); await link.send('G0 Z-15 F2000'); } await link.send('G90'); await link.send('M400'); }));
   if (DexSerial.supported()) { autoReconnect('page reloaded'); navigator.serial.addEventListener('connect', () => setTimeout(() => autoReconnect('USB plugged in'), 500)); }
   $('btnHome').addEventListener('click', guard(async () => { log('homing…'); await link.send('M1112'); await link.send('M400'); await link.send('M114'); if (S.needsHome) { S.needsHome = false; log('homed — drawing is enabled again'); updateButtons(); qRefresh(); } }));
   $('btnPos').addEventListener('click', guard(() => link.send('M114')));
@@ -1437,7 +1449,7 @@ window.DEXARM_PEN_OFFSET=114;
 
   // ---------- streaming ----------
   // ---- resume after an accidental reload: progress is checkpointed to the browser every 2 s while drawing ----
-  const RESUME_KEY = 'dexdraw.resume.v1';
+  const RESUME_KEY = K('dexdraw.resume.v1');
   function saveCheckpoint(cp) { try { localStorage.setItem(RESUME_KEY, JSON.stringify(cp)); } catch (_) { } }
   function clearCheckpoint() { try { localStorage.removeItem(RESUME_KEY); } catch (_) { } }
   function loadCheckpoint() { try { const c = JSON.parse(localStorage.getItem(RESUME_KEY) || 'null'); return c && c.gcode && c.line > 0 && c.line < c.total ? c : null; } catch (_) { return null; } }
@@ -1462,7 +1474,7 @@ window.DEXARM_PEN_OFFSET=114;
     try {
       const done = await link.stream(program, {
         inflight: num('inflight'), shouldPause: () => S.paused, shouldStop: () => S.stopFlag, onStatus: m => log('⚠ ' + m, 'err'), penUp: `G0 Z${o.penUpZ} F${o.zSpeed}`, penDown: `G1 Z${o.penDownZ} F${o.zSpeed}`,
-        onProgress: (i, n) => { $('prog').firstElementChild.style.width = (100 * i / n) + '%'; $('progTxt').textContent = `${i} / ${n} lines · ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+        onProgress: (i, n) => { S.progressPct = 100 * i / n; $('prog').firstElementChild.style.width = (100 * i / n) + '%'; $('progTxt').textContent = `${i} / ${n} lines · ${((performance.now() - t0) / 1000).toFixed(0)} s`;
           const orig = Math.max(0, Math.min(base.total - 1, i + offset)); if (performance.now() - lastSave > 2000) { lastSave = performance.now(); saveCheckpoint({ gcode: base.gcode, total: base.total, line: orig, job: base.job, name: base.name, secondsBefore: (base.secondsBefore || 0) + (performance.now() - t0) / 1000, at: Date.now() }); } }
       });
       S.lastDrawSeconds = (base.secondsBefore || 0) + (performance.now() - t0) / 1000; log(`done: ${done} lines in ${((performance.now() - t0) / 1000).toFixed(1)} s${resume ? ' (resumed)' : ''}`); ok = true;
@@ -1617,6 +1629,18 @@ window.DEXARM_PEN_OFFSET=114;
   }
   // ---------- event queue + auto-run (talks to the Sketchy server when hosted by it) ----------
   const Q = { on: false, busy: false, current: null, loaded: null, timer: null, available: false }; qInit = true;
+  let lastBeat = 0;
+  function heartbeat() { if (Date.now() - lastBeat < 2500) return; lastBeat = Date.now();
+    const st = S.running ? 'drawing' : Q.busy ? 'loading' : Q.loaded ? 'ready to draw' : Q.on ? 'auto-run' : link.connected ? 'idle' : 'not connected';
+    fetch('/api/bots/heartbeat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bot: BOT, connected: link.connected, status: st, jobId: Q.current ? Q.current.id : (Q.loaded ? Q.loaded.id : null), number: Q.current ? Q.current.number : (Q.loaded ? Q.loaded.number : null), progress: S.running ? S.progressPct || 0 : 0 }) }).catch(() => {}); }
+  function syncBotUI(n, list) {
+    const badge = $('botBadge'), sel = $('botSel'), strip = $('botStrip');
+    if (n <= 1) { badge.style.display = 'none'; sel.style.display = 'none'; strip.style.display = 'none'; document.documentElement.style.setProperty('--bot', BOT_COLORS[0]); return; }
+    badge.style.display = ''; badge.textContent = 'BOT ' + BOT; badge.style.background = BOT_COLORS[(BOT - 1) % BOT_COLORS.length]; document.documentElement.style.setProperty('--bot', BOT_COLORS[(BOT - 1) % BOT_COLORS.length]);
+    if (sel.options.length !== n) { sel.innerHTML = Array.from({ length: n }, (_, i) => `<option value="${i + 1}">Bot ${i + 1}</option>`).join(''); } sel.value = BOT; sel.style.display = '';
+    strip.style.display = ''; strip.innerHTML = list.map(b => `<div class="botCard ${b.bot === BOT ? 'me' : ''} ${b.live && b.connected ? 'on' : ''}" style="--c:${BOT_COLORS[(b.bot - 1) % BOT_COLORS.length]}"><b>Bot ${b.bot}</b><span>${b.live ? (b.connected ? (b.status === 'drawing' && b.number ? `drawing #${b.number} · ${Math.round(b.progress)}%` : b.status) : 'tab open, arm not connected') : 'no tab open'}</span><span class="note">${b.waiting} waiting</span></div>`).join('');
+  }
+  $('botSel').addEventListener('change', () => { const u = new URL(location.href); u.searchParams.set('bot', $('botSel').value); location.href = u.toString(); });
   async function qFetch(url, opts) { const r = await fetch(url, opts); if (!r.ok) throw new Error(url + ' ' + r.status); return r.json(); }
   async function qStatus(id, status, error, extra) { // report a job's outcome; retries so a network hiccup can't leave it stuck in "drawing"
     for (let i = 0; i < 5; i++) { try { return await qFetch('/api/jobs/' + id + '/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ status, error: error || '' }, extra || {})) }); } catch (e) { if (i === 4) throw e; await new Promise(r => setTimeout(r, 1500)); } }
@@ -1624,11 +1648,15 @@ window.DEXARM_PEN_OFFSET=114;
   function drawReport() { const o = S.objects.find(x => x.kind !== 'text') || S.objects[0], sel = document.querySelector('.preset[data-group="speed"] .pSel'); return { drawSeconds: S.lastDrawSeconds || 0, strokes: S.plan ? S.plan.strokes.length : 0, widthMm: o ? o.w : 0, preset: sel ? sel.value : '' }; }
   function clearCanvas() { for (const o of S.objects.slice()) deleteObj(o); S.gcode = null; refresh(); }
   async function qRefresh() {
+    heartbeat();
     let d; try { d = await qFetch('/api/queue'); Q.available = true; } catch (_) { Q.available = false; $('qList').innerHTML = '<div class="note">Queue server not reachable (open this page from the Sketchy server to use the event queue).</div>'; return; }
     if (!Q.checked) { Q.checked = true; const cp = loadCheckpoint(); for (const j of d.jobs.filter(j => j.status === 'drawing' && !(cp && cp.job && cp.job.id === j.id))) { log(`queue: #${j.number} was interrupted (page reloaded) — put back in line`); await qStatus(j.id, 'ready').catch(() => {}); j.status = 'ready'; } }
-    const ready = d.jobs.filter(j => j.status === 'ready'), proc = d.jobs.filter(j => j.status === 'pending' || j.status === 'processing');
-    $('qSum').textContent = `${ready.length} ready · ${proc.length} generating · ${d.done.length} drawn`;
-    $('qList').innerHTML = d.jobs.filter(j => ['ready', 'drawing'].includes(j.status)).slice(0, 12).map(j => `<div class="qItem ${j.status}" data-id="${j.id}"><img src="/api/jobs/${j.id}/art?thumb=1"><div><b>#${j.number}</b> ${j.themeName}<br><span class="note">${j.status === 'drawing' ? '✎ drawing now' : 'ready'}</span></div><button data-skip="${j.id}" title="Skip this one">✕</button></div>`).join('') || '<div class="note">Nothing ready yet.</div>';
+    const nBots = Math.max(1, +(d.settings && d.settings.bots) || 1); syncBotUI(nBots, d.bots || []);
+    const mine = j => nBots <= 1 || j.bot === BOT || !j.bot, readyAll = d.jobs.filter(j => j.status === 'ready');
+    const ready = readyAll.filter(mine), proc = d.jobs.filter(j => j.status === 'pending' || j.status === 'processing');
+    $('qSum').textContent = nBots > 1 ? `${ready.length} for Bot ${BOT} · ${readyAll.length} ready in all · ${proc.length} generating · ${d.done.length} drawn` : `${ready.length} ready · ${proc.length} generating · ${d.done.length} drawn`;
+    const shown = d.jobs.filter(j => ['ready', 'drawing'].includes(j.status)).sort((a, b) => (mine(b) - mine(a)) || a.number - b.number).slice(0, 14);
+    $('qList').innerHTML = shown.map(j => `<div class="qItem ${j.status} ${nBots > 1 && !mine(j) ? 'other' : ''}" data-id="${j.id}"><img src="/api/jobs/${j.id}/art?thumb=1"><div><b>#${j.number}</b> ${j.themeName}<br><span class="note">${j.status === 'drawing' ? '✎ drawing now' : 'ready'}${nBots > 1 ? ' · ' + (j.bot ? 'Bot ' + j.bot : 'any robot') : ''}</span></div><button data-skip="${j.id}" title="Skip this one">✕</button></div>`).join('') || '<div class="note">Nothing ready yet.</div>';
     $('qList').querySelectorAll('button[data-skip]').forEach(b => b.onclick = async () => { await qFetch('/api/jobs/' + b.dataset.skip + '/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'skipped' }) }); qRefresh(); });
     $('btnQNext').disabled = !ready.length || S.running || Q.busy || !link.connected || S.needsHome || !!Q.loaded; $('btnQNext').textContent = ready.length ? `1 · Load next sketch (${ready.length} waiting)` : '1 · Load next sketch'; syncStep();
     if (S.needsHome && Q.on) { Q.on = false; syncQ(); $('qStatus').textContent = 'STOP was used — press ⌂ Home, then start again'; }
@@ -1647,7 +1675,7 @@ window.DEXARM_PEN_OFFSET=114;
   async function qLoadNext() {
     if (Q.busy || S.running || Q.loaded) return false; Q.busy = true; $('btnQNext').disabled = true; let job = null;
     try {
-      ({ job } = await qFetch('/api/queue/claim', { method: 'POST' })); if (!job) { $('qStatus').textContent = 'Nothing ready yet — it loads as soon as a guest\'s sketch is finished.'; return false; }
+      ({ job } = await qFetch('/api/queue/claim', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bot: BOT }) })); if (!job) { $('qStatus').textContent = 'Nothing ready yet — it loads as soon as a guest\'s sketch is finished.'; return false; }
       Q.current = job; $('qStatus').textContent = `#${job.number} ${job.themeName}: converting…`;
       await loadFromUrl(`/api/jobs/${job.id}/art`, `queue-${job.number}.png`);
       await new Promise(r => setTimeout(r, 400)); for (let i = 0; i < 100 && (S.planDirty || !S.plan); i++) await new Promise(r => setTimeout(r, 200)); // trace worker + planner
@@ -1728,14 +1756,14 @@ window.DEXARM_PEN_OFFSET=114;
   for (const id of ['qNames', 'qNamePos', 'qNameFont', 'qNameH']) $(id).addEventListener('change', () => { const t = S.objects.find(x => x.kind === 'text'); if (!t) return; if (!$('qNames').checked) { deleteObj(t); return; } if (id === 'qNameFont') { const n = textObject(t.text, $('qNameFont').value, num('qNameH')); S.objects[S.objects.indexOf(t)] = n; } applyEventSize(); });
   $('qSize').addEventListener('change', () => { $('qSizeCustomRow').style.display = $('qSize').value === 'custom' ? '' : 'none'; });
   $('qSizeCustomRow').style.display = $('qSize').value === 'custom' ? '' : 'none';
-  function syncQ() { try { localStorage.setItem('dexdraw.autoRun', Q.on ? '1' : '0'); } catch (_) { } $('btnQAuto').textContent = Q.on ? '■ Stop auto-run' : '▶ Auto-run queue'; $('btnQAuto').classList.toggle('danger', Q.on); if (!Q.on) { Q.waitingContinue = false; $('btnQContinue').style.display = 'none'; } }
+  function syncQ() { try { localStorage.setItem(K('dexdraw.autoRun'), Q.on ? '1' : '0'); } catch (_) { } $('btnQAuto').textContent = Q.on ? '■ Stop auto-run' : '▶ Auto-run queue'; $('btnQAuto').classList.toggle('danger', Q.on); if (!Q.on) { Q.waitingContinue = false; $('btnQContinue').style.display = 'none'; } }
   $('btnQAuto').addEventListener('click', () => { if (!link.connected) { log('connect the arm first', 'err'); return; } if (S.needsHome) { log('press ⌂ Home first (STOP was used)', 'err'); return; } Q.on = !Q.on; syncQ(); if (Q.on) { log('auto-run on: setup must be done (Home, pen height, paper center)'); qRefresh(); } });
   $('btnQNext').addEventListener('click', () => { if (!link.connected) { log('connect the arm first', 'err'); return; } if (S.needsHome) { log('press ⌂ Home first (STOP was used)', 'err'); return; } qLoadNext(); });
   $('btnQDraw').addEventListener('click', () => { if (!link.connected) { log('connect the arm first', 'err'); return; } if (S.needsHome) { log('press ⌂ Home first (STOP was used)', 'err'); return; } qDrawLoaded(); });
   $('btnQContinue').addEventListener('click', () => { Q.waitingContinue = false; $('btnQContinue').style.display = 'none'; qRefresh(); });
   $('btnQSkipCur').addEventListener('click', () => { Q.cancelPreview = true; if (S.running) S.stopFlag = true; else if (Q.loaded) qSkipLoaded(); });
   // auto-run survives a page reload: it resumes as soon as the arm has reconnected
-  Q.resume = localStorage.getItem('dexdraw.autoRun') === '1';
+  Q.resume = localStorage.getItem(K('dexdraw.autoRun')) === '1';
   syncQ(); qRefresh(); Q.timer = setInterval(qRefresh, 4000);
 
   // ---------- hover help ----------
