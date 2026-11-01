@@ -51,9 +51,9 @@
   .cam video,.cam img,.cam canvas{max-width:100%;max-height:100%;object-fit:contain}
   .cam img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
   .cam video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1) scale(var(--zoom,1.6));transform-origin:center}
-  .count{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);min-width:260px;padding:10px 40px;border-radius:40px;background:rgba(0,0,0,.6);color:#fff;font:900 200px/1 system-ui;text-align:center;display:none;letter-spacing:1px;text-shadow:0 4px 18px rgba(0,0,0,.5)}
+  .count{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font:900 260px/1 system-ui;text-align:center;display:none;text-shadow:0 0 12px rgba(0,0,0,.9),0 6px 30px rgba(0,0,0,.8);-webkit-text-stroke:3px rgba(0,0,0,.35)}
   .count.on{display:block}
-  .count.go{background:rgba(0,109,246,.9);font-size:96px;padding:28px 48px}
+  .count.go{font-size:120px;color:#fff}
   .tip{position:absolute;top:18px;left:50%;transform:translateX(-50%);padding:8px 16px;border-radius:999px;background:rgba(0,0,0,.5);color:#fff;font:600 16px system-ui;white-space:nowrap}
   .flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
   .flash.on{animation:fl .35s ease-out}@keyframes fl{0%{opacity:.9}100%{opacity:0}}
