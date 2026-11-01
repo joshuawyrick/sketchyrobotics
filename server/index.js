@@ -149,6 +149,36 @@ const adminAuth = (req, res, next) => { const t = req.get('x-admin-token') || re
 app.use('/studio', express.static(path.join(ROOT, 'public', 'studio')));
 app.use('/admin', express.static(path.join(ROOT, 'public', 'admin')));
 app.use('/', express.static(path.join(ROOT, 'public', 'guest')));
+app.get('/p/:code', (req, res) => res.sendFile(path.join(ROOT, 'public', 'phone', 'index.html'))); // guest's own phone: scanned from the iPad's QR
+
+// ----- phone hand-off: the iPad mints a short code tied to the theme/variant the guest picked; the phone uploads a photo to it -----
+const phoneCodes = new Map(); // code -> { theme, themeName, variant, createdAt, photo: Buffer|null }
+const PHONE_TTL = 10 * 60000;
+setInterval(() => { for (const [c, v] of phoneCodes) if (Date.now() - v.createdAt > PHONE_TTL) phoneCodes.delete(c); }, 60000);
+app.post('/api/phone/code', (req, res) => {
+  const theme = readTheme(slugify(req.body.theme || '')); const variant = String(req.body.variant || '');
+  if (!theme || !VARIANTS.includes(variant)) return res.status(400).json({ error: 'pick a style first' });
+  let code; do { code = Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[crypto.randomInt(32)]).join(''); } while (phoneCodes.has(code));
+  phoneCodes.set(code, { theme: theme.slug, themeName: theme.name, variant, createdAt: Date.now(), photo: null });
+  const base = (req.get('x-forwarded-proto') || req.protocol) + '://' + req.get('host');
+  res.json({ code, url: `${base}/p/${code}`, expiresInSec: PHONE_TTL / 1000 });
+});
+app.get('/api/phone/:code/qr.svg', async (req, res) => {
+  const v = phoneCodes.get(req.params.code); if (!v) return res.status(404).end();
+  const base = (req.get('x-forwarded-proto') || req.protocol) + '://' + req.get('host');
+  try { const svg = await require('qrcode').toString(`${base}/p/${req.params.code}`, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }); res.setHeader('content-type', 'image/svg+xml'); res.setHeader('cache-control', 'no-store'); res.send(svg); } catch (e) { res.status(500).end(); }
+});
+app.get('/api/phone/:code', (req, res) => { // both the phone (to show what was picked) and the iPad (polling for the photo) read this
+  const v = phoneCodes.get(req.params.code); if (!v) return res.json({ ok: false, expired: true });
+  res.json({ ok: true, themeName: v.themeName, variant: VARIANT_LABELS[v.variant] || v.variant, hasPhoto: !!v.photo, event: getSettings().eventName });
+});
+app.post('/api/phone/:code/photo', upload.single('photo'), async (req, res) => {
+  const v = phoneCodes.get(req.params.code); if (!v) return res.status(410).json({ error: 'This code has expired — ask for a new QR code on the iPad.' });
+  if (!req.file) return res.status(400).json({ error: 'no photo' });
+  try { v.photo = await sharp(req.file.buffer).rotate().resize(1536, 1536, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 92 }).toBuffer(); v.photoAt = Date.now(); res.json({ ok: true }); }
+  catch (e) { res.status(400).json({ error: 'That file is not a photo we can read.' }); }
+});
+app.get('/api/phone/:code/photo', (req, res) => { const v = phoneCodes.get(req.params.code); if (!v || !v.photo) return res.status(404).end(); res.setHeader('content-type', 'image/jpeg'); res.setHeader('cache-control', 'no-store'); res.send(v.photo); });
 
 // ----- public (guest) -----
 app.get('/api/themes', (req, res) => res.json({ themes: listThemes().filter(t => t.enabled).map(t => ({ slug: t.slug, name: t.name, hasThumb: t.hasThumb, variants: VARIANTS.filter(v => t.prompts[v].trim()) })), variants: VARIANT_LABELS, event: getSettings().eventName, cameraZoom: getSettings().cameraZoom }));

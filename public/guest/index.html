@@ -57,6 +57,13 @@
   .tip{position:absolute;top:18px;left:50%;transform:translateX(-50%);padding:8px 16px;border-radius:999px;background:rgba(0,0,0,.5);color:#fff;font:600 16px system-ui;white-space:nowrap}
   .flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
   .flash.on{animation:fl .35s ease-out}@keyframes fl{0%{opacity:.9}100%{opacity:0}}
+  .qr{position:absolute;inset:0;background:rgba(10,20,40,.92);display:flex;align-items:center;justify-content:center;padding:20px}
+  .qrBox{background:#fff;border-radius:22px;padding:22px;display:flex;flex-direction:column;align-items:center;gap:14px;max-width:min(92%,460px);width:100%}
+  .cam .qrBox img{position:static;inset:auto;width:min(62vw,300px);height:auto;max-height:none;aspect-ratio:1;display:block}
+  .qrTxt{display:flex;flex-direction:column;gap:6px;text-align:center}.qrTxt b{font-size:22px}.qrTxt span{color:var(--mut)}
+  .qrCode{font:800 26px/1 ui-monospace,Menlo,monospace;letter-spacing:6px;color:var(--ink)!important}
+  .qrWait{color:var(--blue)!important;font-weight:700}
+  .qrBox .btn{flex:0 0 auto;width:100%}
   .guide{position:absolute;left:50%;top:48%;height:58%;max-height:520px;aspect-ratio:3/4;transform:translate(-50%,-50%);pointer-events:none;border:3px dashed rgba(255,255,255,.55);border-radius:50%/48%}
   .snap{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:min(78%,520px);padding:26px 30px;border-radius:32px;background:#0a6cff;border:6px solid #fff;box-shadow:0 10px 40px rgba(0,0,0,.55),0 0 0 10px rgba(10,108,255,.35);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;animation:pulse 1.6s ease-in-out infinite}
   .snap b{font:900 40px/1.1 system-ui;color:#fff;letter-spacing:.5px}
@@ -106,8 +113,9 @@
       <div class="tip" id="camTip">Get your face in the oval, then tap the blue button</div>
       <button class="snap" id="shutter"><b>TAP HERE TO START</b><small>3 · 2 · 1 · then smile!</small></button>
       <img id="shot" style="display:none">
+      <div class="qr" id="qr" style="display:none"><div class="qrBox"><img id="qrImg" alt="QR code"><div class="qrTxt"><b>Scan with your phone's camera</b><span>Take a photo there or pick one from your phone, then tap Send. It shows up here.</span><span class="qrCode" id="qrCode"></span><span class="qrWait" id="qrWait">Waiting for your phone…</span></div><button class="btn" id="qrCancel">Back to the camera</button></div></div>
     </div>
-    <div class="bar" id="camBar"><button class="btn" id="backCam">Back</button><button class="btn" id="fileBtn">Use a photo instead</button><input type="file" id="fileIn" accept="image/*" capture="user" style="display:none"></div>
+    <div class="bar" id="camBar"><button class="btn" id="backCam">Back</button><button class="btn" id="phoneBtn">📱 Use my phone</button><button class="btn" id="fileBtn">Use a photo instead</button><input type="file" id="fileIn" accept="image/*" capture="user" style="display:none"></div>
     <div class="bar" id="shotBar" style="display:none"><button class="btn" id="retake">Retake</button><button class="btn primary" id="send">Looks good — send it</button></div>
   </section>
   <!-- 4 status -->
@@ -180,7 +188,7 @@
   // The camera stays on while a guest is posing/reviewing, and is released on the status screen so the
   // green camera light goes off and the battery isn't drained between guests. iPadOS remembers the
   // permission answer for a site (and for a home-screen app), so the next guest's tap re-opens it with no prompt.
-  function closeCam() { if (S.stream) { S.stream.getTracks().forEach(t => t.stop()); S.stream = null; $('video').srcObject = null; } }
+  function closeCam() { if (phonePoll) closePhone(); if (S.stream) { S.stream.getTracks().forEach(t => t.stop()); S.stream = null; $('video').srcObject = null; } }
   window.addEventListener('pagehide', () => { if (S.stream) S.stream.getTracks().forEach(t => t.stop()); });
   // if the OS suspends the track (iPad sleep), reopen it next time the camera screen shows
   function streamAlive() { return S.stream && S.stream.getTracks().some(t => t.readyState === 'live'); }
@@ -205,6 +213,24 @@
   $('fileIn').onchange = () => { const f = $('fileIn').files[0]; if (f) { S.blob = f; showShot(URL.createObjectURL(f)); } $('fileIn').value = ''; };
   function showShot(url) { $('shot').src = url; $('shot').style.display = ''; $('video').style.display = 'none'; $('guide').style.display = 'none'; $('shutter').style.display = 'none'; $('camTip').style.display = 'none'; $('camBar').style.display = 'none'; $('shotBar').style.display = ''; }
   $('retake').onclick = openCam;
+  // ---- guest's own phone: QR code → /p/CODE → photo lands here ----
+  let phonePoll = null;
+  async function openPhone() {
+    try {
+      const r = await fetch('/api/phone/code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ theme: S.theme.slug, variant: variantKey() }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'failed');
+      S.phoneCode = d.code; $('qrImg').src = `/api/phone/${d.code}/qr.svg`; $('qrCode').textContent = d.code; $('qrWait').textContent = 'Waiting for your phone…';
+      $('qr').style.display = ''; $('shutter').style.display = 'none'; $('camTip').style.display = 'none';
+      clearInterval(phonePoll); phonePoll = setInterval(async () => {
+        try { const st = await fetch(`/api/phone/${S.phoneCode}`).then(x => x.json());
+          if (!st.ok) { closePhone(); $('camTip').textContent = 'That code expired — tap "Use my phone" again'; $('camTip').style.display = ''; return; }
+          if (st.hasPhoto) { const b = await fetch(`/api/phone/${S.phoneCode}/photo`).then(x => x.blob()); closePhone(); S.blob = b; showShot(URL.createObjectURL(b)); bump(); }
+        } catch (_) { }
+      }, 2000);
+    } catch (e) { $('camTip').textContent = 'Could not make a code: ' + e.message; $('camTip').style.display = ''; }
+  }
+  function closePhone() { clearInterval(phonePoll); phonePoll = null; S.phoneCode = null; $('qr').style.display = 'none'; if (S.stream) { $('shutter').style.display = ''; $('camTip').style.display = ''; } }
+  $('phoneBtn').onclick = openPhone;
+  $('qrCancel').onclick = closePhone;
   $('backCam').onclick = () => { closeCam(); show('s-who'); };
   const _origShow = show; // keep idle timer in sync with screen changes
   $('send').onclick = async () => {

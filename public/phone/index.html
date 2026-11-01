@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Send your photo</title>
+<style>
+  :root{--blue:#006df6;--ink:#0a0a0a;--mut:#5b6474;--bg:#f3f5f8;--card:#fff;--line:#dde2ea}
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  main{max-width:520px;margin:0 auto;padding:22px 18px 40px;display:flex;flex-direction:column;gap:14px}
+  h1{font-size:26px;margin:0}
+  .crumb{color:var(--mut)}
+  .btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;border:2px solid var(--line);border-radius:16px;padding:22px 18px;font:700 20px system-ui;background:var(--card);color:var(--ink);cursor:pointer;text-align:center}
+  .btn.primary{background:var(--blue);color:#fff;border-color:var(--blue)}
+  .btn.primary:disabled{opacity:.5}
+  .btn .ic{font-size:28px}
+  .preview{width:100%;border-radius:16px;background:#fff;border:2px solid var(--line);display:none;max-height:60vh;object-fit:contain}
+  .msg{padding:14px 16px;border-radius:14px;background:#fff;border:2px solid var(--line)}
+  .msg.ok{border-color:#1a9c4c;background:#e9f8ee}
+  .msg.bad{border-color:#d7263d;background:#fdeaed}
+  .big{font-size:34px;font-weight:800;text-align:center;margin:30px 0 6px}
+  .hint{color:var(--mut);text-align:center}
+</style>
+</head>
+<body>
+<main>
+  <div class="crumb" id="crumb">Sketchy Robotics</div>
+  <div id="pick">
+    <h1>Send a photo to the booth</h1>
+    <p class="hint" id="what">Loading…</p>
+    <button class="btn primary" id="takeBtn"><span class="ic">📷</span> Take a photo now</button>
+    <div style="height:12px"></div>
+    <button class="btn" id="chooseBtn"><span class="ic">🖼️</span> Choose a photo from my phone</button>
+    <input type="file" id="takeIn" accept="image/*" capture="user" style="display:none">
+    <input type="file" id="chooseIn" accept="image/*" style="display:none">
+    <p class="hint" style="margin-top:18px">Face the camera, good light, nothing covering the face.</p>
+  </div>
+  <div id="confirm" style="display:none">
+    <img class="preview" id="preview" alt="">
+    <div style="height:12px"></div>
+    <button class="btn primary" id="sendBtn">Send this one to the booth</button>
+    <div style="height:12px"></div>
+    <button class="btn" id="againBtn">Pick a different photo</button>
+  </div>
+  <div id="done" style="display:none">
+    <div class="big">Sent! ✓</div>
+    <p class="hint">Look at the iPad — your photo is there. You can close this page.</p>
+  </div>
+  <div id="err" class="msg bad" style="display:none"></div>
+</main>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const code = location.pathname.split('/').pop();
+  let file = null;
+  const fail = m => { $('err').textContent = m; $('err').style.display = ''; };
+  fetch('/api/phone/' + code).then(r => r.json()).then(d => {
+    if (!d.ok) { $('pick').style.display = 'none'; return fail('This code has expired. Tap "Use my phone" on the iPad again for a fresh one.'); }
+    $('crumb').textContent = d.event || 'Sketchy Robotics'; $('what').textContent = `For: ${d.themeName} · ${d.variant}`;
+  }).catch(() => fail('Could not reach the booth. Check your phone has signal and try again.'));
+  $('takeBtn').onclick = () => $('takeIn').click();
+  $('chooseBtn').onclick = () => $('chooseIn').click();
+  const picked = inp => { const f = inp.files[0]; inp.value = ''; if (!f) return; file = f; $('preview').src = URL.createObjectURL(f); $('preview').style.display = 'block'; $('pick').style.display = 'none'; $('confirm').style.display = ''; $('err').style.display = 'none'; };
+  $('takeIn').onchange = () => picked($('takeIn'));
+  $('chooseIn').onchange = () => picked($('chooseIn'));
+  $('againBtn').onclick = () => { file = null; $('confirm').style.display = 'none'; $('pick').style.display = ''; };
+  $('sendBtn').onclick = async () => {
+    if (!file) return; $('sendBtn').disabled = true; $('sendBtn').textContent = 'Sending…';
+    const fd = new FormData(); fd.append('photo', file, 'photo.jpg');
+    try { const r = await fetch('/api/phone/' + code + '/photo', { method: 'POST', body: fd }); const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'upload failed');
+      $('confirm').style.display = 'none'; $('done').style.display = ''; }
+    catch (e) { fail(e.message); $('sendBtn').disabled = false; $('sendBtn').textContent = 'Send this one to the booth'; }
+  };
+})();
+</script>
+</body>
+</html>
