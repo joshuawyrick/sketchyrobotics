@@ -24,7 +24,7 @@
   .prompt{margin:12px 0}.prompt h3{margin:0 0 4px;font-size:13px}.prompt .cnt{float:right;color:var(--mut);font-weight:400}
   table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:middle;font-size:13px}th{color:var(--mut);font-weight:600;font-size:12px;text-transform:uppercase}
   td img{height:56px;border-radius:6px;background:#fff;border:1px solid var(--line)}
-  .pill{display:inline-block;padding:2px 8px;border-radius:10px;font:600 11px system-ui;background:#e9eef7;color:#334}.pill.ready{background:#dcf5e6;color:#0b6b3a}.pill.processing,.pill.pending{background:#fff4d6;color:#6b4e00}.pill.drawing{background:#dbeafe;color:#1e40af}.pill.failed{background:#fde8eb;color:#8f1d2b}.pill.done{background:#e5e7eb;color:#374151}
+  .pill{display:inline-block;padding:2px 8px;border-radius:10px;font:600 11px system-ui;background:#e9eef7;color:#334}.pill.ready{background:#dcf5e6;color:#0b6b3a}.pill.processing,.pill.pending{background:#fff4d6;color:#6b4e00}.pill.drawing{background:#dbeafe;color:#1e40af}.pill.archived{background:#eee;color:#666}.pill.failed{background:#fde8eb;color:#8f1d2b}.pill.done{background:#e5e7eb;color:#374151}
   .login{max-width:360px;margin:80px auto}
   .note{color:var(--mut);font-size:12.5px}
   .ok{color:var(--ok)}.bad{color:var(--bad)}
@@ -42,7 +42,16 @@
 
   <section class="tab" id="tab-queue">
     <div class="card"><h2>Queue <span class="note" id="qsum"></span></h2>
-      <table><thead><tr><th>#</th><th>Photo</th><th>Line art</th><th>Style</th><th>Status</th><th>Time</th><th></th></tr></thead><tbody id="qbody"></tbody></table></div>
+      <div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:8px">
+        <button id="bArchive" disabled>Archive selected</button><button id="bRequeue" disabled>Put selected back in queue</button><button id="bDelete" class="danger" disabled>Delete selected</button>
+        <span class="note" id="selNote"></span>
+        <span style="margin-left:auto"></span>
+        <label class="note" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="showArchived"> Show archived</label>
+        <a id="csvLink" href="#"><button>Download draw log (CSV)</button></a>
+      </div>
+      <div class="note" id="drawStats" style="margin-bottom:8px"></div>
+      <table><thead><tr><th><input type="checkbox" id="selAll" title="Select all shown"></th><th>#</th><th>Photo</th><th>Line art</th><th>Style</th><th>Status</th><th>Taken</th><th>Draw time</th><th></th></tr></thead><tbody id="qbody"></tbody></table>
+      <p class="note">Archived entries leave every list but keep the photo and line art (tick "Show archived" to see them, download them, or put them back in the queue). Delete removes the files for good.</p></div>
   </section>
 
   <section class="tab" id="tab-themes">
@@ -115,26 +124,44 @@
   }
   // ----- queue -----
   const fmt = ms => { const d = new Date(ms); return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
+  const fmtS = sec => sec ? `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}` : '';
+  const SEL = new Set();
+  function syncSel() { const n = SEL.size; for (const id of ['bArchive', 'bRequeue', 'bDelete']) $(id).disabled = !n; $('selNote').textContent = n ? `${n} selected` : ''; }
   function renderQueue() {
-    const js = STATE.jobs.filter(j => !j.id.startsWith('test-')).slice().reverse();
-    const counts = {}; for (const j of js) counts[j.status] = (counts[j.status] || 0) + 1;
+    const all = STATE.jobs.filter(j => !j.id.startsWith('test-')).slice().reverse();
+    const js = $('showArchived').checked ? all : all.filter(j => j.status !== 'archived');
+    const counts = {}; for (const j of all) counts[j.status] = (counts[j.status] || 0) + 1;
     $('qsum').textContent = Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(' · ') || 'empty';
+    const drawn = all.filter(j => j.drawSeconds); if (drawn.length) { const avg = drawn.reduce((a, j) => a + j.drawSeconds, 0) / drawn.length; const w = drawn.filter(j => j.widthMm); $('drawStats').textContent = `Draw time: ${drawn.length} drawing${drawn.length > 1 ? 's' : ''} logged · average ${fmtS(avg)} · fastest ${fmtS(Math.min(...drawn.map(j => j.drawSeconds)))} · slowest ${fmtS(Math.max(...drawn.map(j => j.drawSeconds)))}${w.length ? ` · average width ${(w.reduce((a, j) => a + j.widthMm, 0) / w.length / 25.4).toFixed(1)} in` : ''}`; } else $('drawStats').textContent = 'Draw times appear here once the robot has finished a drawing.';
+    $('csvLink').href = '/api/admin/drawlog.csv?token=' + encodeURIComponent(TOKEN);
+    for (const id of Array.from(SEL)) if (!js.some(j => j.id === id)) SEL.delete(id);
     $('qbody').innerHTML = js.map(j => `<tr>
+      <td><input type="checkbox" class="selRow" data-id="${j.id}" ${SEL.has(j.id) ? 'checked' : ''}></td>
       <td><b>#${j.number}</b></td>
       <td><img src="/api/jobs/${j.id}/photo?token=${encodeURIComponent(TOKEN)}" onerror="this.style.display='none'"></td>
-      <td>${['ready', 'drawing', 'done', 'skipped'].includes(j.status) ? `<a href="/api/jobs/${j.id}/art" target="_blank"><img src="/api/jobs/${j.id}/art?thumb=1"></a>` : ''}</td>
+      <td>${['ready', 'drawing', 'done', 'skipped', 'archived'].includes(j.status) ? `<a href="/api/jobs/${j.id}/art" target="_blank"><img src="/api/jobs/${j.id}/art?thumb=1"></a>` : ''}</td>
       <td>${j.themeName}<br><span class="note">${STATE.variants[j.variant] || j.variant}</span></td>
       <td><span class="pill ${j.status}">${j.status}</span>${j.error ? `<br><span class="bad note">${j.error}</span>` : ''}</td>
       <td class="note">${fmt(j.createdAt)}</td>
+      <td class="note" style="white-space:nowrap">${j.drawSeconds ? `<b>${fmtS(j.drawSeconds)}</b><br>${j.widthMm ? (j.widthMm / 25.4).toFixed(1) + ' in · ' : ''}${j.strokes || ''} strokes${j.preset ? '<br>' + j.preset : ''}` : ''}</td>
       <td style="white-space:nowrap">
         ${j.status === 'failed' || j.status === 'pending' ? `<button data-a="retry" data-id="${j.id}">Retry</button>` : ''}
         ${['pending', 'ready'].includes(j.status) ? `<button data-a="front" data-id="${j.id}">Move to front</button>` : ''}
-        ${['done', 'skipped', 'failed'].includes(j.status) ? `<button data-a="requeue" data-id="${j.id}">Draw again</button>` : ''}
+        ${['done', 'skipped', 'failed', 'archived'].includes(j.status) ? `<button data-a="requeue" data-id="${j.id}">Draw again</button>` : ''}
+        ${j.status !== 'archived' ? `<button data-a="archive" data-id="${j.id}" title="Out of the queue; photo and line art are kept">Archive</button>` : ''}
         ${['pending', 'ready', 'processing', 'drawing'].includes(j.status) ? `<button data-a="skip" data-id="${j.id}">Skip</button>` : ''}
         <button data-a="delete" data-id="${j.id}" class="danger">✕</button>
       </td></tr>`).join('');
-    $('qbody').querySelectorAll('button[data-a]').forEach(b => b.onclick = async () => { if (b.dataset.a === 'delete' && !confirm('Delete this entry?')) return; await api('/api/admin/jobs/' + b.dataset.id, { method: 'POST', json: { action: b.dataset.a } }); refresh(); toast({ retry: 'Re-generating', front: 'Moved to front of the line', skip: 'Skipped', requeue: 'Back in the robot queue', delete: 'Deleted' }[b.dataset.a] || 'Done'); });
+    $('qbody').querySelectorAll('button[data-a]').forEach(b => b.onclick = async () => { if (b.dataset.a === 'delete' && !confirm('Delete this entry?')) return; await api('/api/admin/jobs/' + b.dataset.id, { method: 'POST', json: { action: b.dataset.a } }); refresh(); toast({ retry: 'Re-generating', front: 'Moved to front of the line', skip: 'Skipped', requeue: 'Back in the robot queue', delete: 'Deleted', archive: 'Archived — photo and line art kept' }[b.dataset.a] || 'Done'); });
+    $('qbody').querySelectorAll('.selRow').forEach(c => c.onchange = () => { if (c.checked) SEL.add(c.dataset.id); else SEL.delete(c.dataset.id); syncSel(); });
+    $('selAll').checked = js.length > 0 && js.every(j => SEL.has(j.id)); syncSel();
   }
+  $('selAll').onchange = () => { const boxes = $('qbody').querySelectorAll('.selRow'); boxes.forEach(c => { c.checked = $('selAll').checked; if (c.checked) SEL.add(c.dataset.id); else SEL.delete(c.dataset.id); }); syncSel(); };
+  $('showArchived').onchange = renderQueue;
+  async function bulk(action, label) { const ids = Array.from(SEL); if (!ids.length) return; if (action === 'delete' && !confirm(`Delete ${ids.length} entr${ids.length > 1 ? 'ies' : 'y'} for good? The photos and line art are removed too.`)) return; const r = await api('/api/admin/jobs-bulk', { method: 'POST', json: { ids, action } }); SEL.clear(); await refresh(); toast(`${r.n} ${label}`); }
+  $('bArchive').onclick = () => bulk('archive', 'archived — photos and line art kept');
+  $('bRequeue').onclick = () => bulk('requeue', 'back in the queue');
+  $('bDelete').onclick = () => bulk('delete', 'deleted');
   // ----- themes -----
   function renderThemes() {
     $('themeGrid').innerHTML = STATE.themes.map(t => `<div class="theme ${t.enabled ? '' : 'off'} ${editing === t.slug ? 'on' : ''}" data-s="${t.slug}">${t.hasThumb ? `<img src="/api/themes/${t.slug}/thumb?v=${Date.now()}">` : '<div class="ph">✎</div>'}<div class="nm">${t.name}</div><div class="note" style="padding:0 8px 8px">${STATE.variantOrder.filter(v => t.prompts[v].trim()).length}/${STATE.variantOrder.length} prompts</div></div>`).join('');

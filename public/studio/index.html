@@ -1424,7 +1424,7 @@ window.DEXARM_PEN_OFFSET=114;
         inflight: num('inflight'), shouldPause: () => S.paused, shouldStop: () => S.stopFlag, onStatus: m => log('⚠ ' + m, 'err'), penUp: `G0 Z${o.penUpZ} F${o.zSpeed}`, penDown: `G1 Z${o.penDownZ} F${o.zSpeed}`,
         onProgress: (i, n) => { $('prog').firstElementChild.style.width = (100 * i / n) + '%'; $('progTxt').textContent = `${i} / ${n} lines · ${((performance.now() - t0) / 1000).toFixed(0)} s`; }
       });
-      log(`done: ${done} lines in ${((performance.now() - t0) / 1000).toFixed(1)} s`); ok = true;
+      S.lastDrawSeconds = (performance.now() - t0) / 1000; log(`done: ${done} lines in ${S.lastDrawSeconds.toFixed(1)} s`); ok = true;
     } catch (e) { if (/stopped/.test(e.message)) log('drawing stopped — pen lifted, position still valid (no Home needed)', 'err'); else log('drawing ' + e.message, 'err'); }
     S.running = false; S.paused = false; updateButtons();
     return ok;
@@ -1564,9 +1564,10 @@ window.DEXARM_PEN_OFFSET=114;
   // ---------- event queue + auto-run (talks to the Sketchy server when hosted by it) ----------
   const Q = { on: false, busy: false, current: null, loaded: null, timer: null, available: false }; qInit = true;
   async function qFetch(url, opts) { const r = await fetch(url, opts); if (!r.ok) throw new Error(url + ' ' + r.status); return r.json(); }
-  async function qStatus(id, status, error) { // report a job's outcome; retries so a network hiccup can't leave it stuck in "drawing"
-    for (let i = 0; i < 5; i++) { try { return await qFetch('/api/jobs/' + id + '/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status, error: error || '' }) }); } catch (e) { if (i === 4) throw e; await new Promise(r => setTimeout(r, 1500)); } }
+  async function qStatus(id, status, error, extra) { // report a job's outcome; retries so a network hiccup can't leave it stuck in "drawing"
+    for (let i = 0; i < 5; i++) { try { return await qFetch('/api/jobs/' + id + '/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ status, error: error || '' }, extra || {})) }); } catch (e) { if (i === 4) throw e; await new Promise(r => setTimeout(r, 1500)); } }
   }
+  function drawReport() { const o = S.objects[0], sel = document.querySelector('.preset[data-group="speed"] .pSel'); return { drawSeconds: S.lastDrawSeconds || 0, strokes: S.plan ? S.plan.strokes.length : 0, widthMm: o ? o.w : 0, preset: sel ? sel.value : '' }; }
   function clearCanvas() { for (const o of S.objects.slice()) deleteObj(o); S.gcode = null; refresh(); }
   async function qRefresh() {
     let d; try { d = await qFetch('/api/queue'); Q.available = true; } catch (_) { Q.available = false; $('qList').innerHTML = '<div class="note">Queue server not reachable (open this page from the Sketchy server to use the event queue).</div>'; return; }
@@ -1612,10 +1613,10 @@ window.DEXARM_PEN_OFFSET=114;
     try {
       generate(); if (!S.gcode) throw new Error(S.block || 'no g-code');
       Q.current = job; $('qStatus').textContent = `#${job.number}: drawing…`; syncStep();
-      ok = await runDrawing();
-      await qStatus(job.id, ok ? 'done' : 'ready', ok ? '' : 'stopped by operator'); // a stopped drawing goes back to the front of the line
+      ok = await runDrawing(); const rep = drawReport();
+      await qStatus(job.id, ok ? 'done' : 'ready', ok ? '' : 'stopped by operator', ok ? rep : null); // a stopped drawing goes back to the front of the line
       Q.loaded = null; Q.current = null; clearCanvas();
-      $('qStatus').textContent = ok ? `#${job.number} done ✓ — fresh paper in, then 1 · Load next sketch.` : `#${job.number} stopped — it is back at the front of the line. Load next sketch draws it again; ✕ in the list skips it.`;
+      $('qStatus').textContent = ok ? `#${job.number} done ✓ in ${fmtS(rep.drawSeconds)} — fresh paper in, then 1 · Load next sketch.` : `#${job.number} stopped — it is back at the front of the line. Load next sketch draws it again; ✕ in the list skips it.`;
       if (!ok && Q.on) { Q.on = false; syncQ(); }
     } catch (e) {
       log('queue: ' + e.message, 'err'); $('qStatus').textContent = 'problem: ' + e.message;

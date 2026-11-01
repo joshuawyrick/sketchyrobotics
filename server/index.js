@@ -92,7 +92,7 @@ function loadState() {
   seq = Math.max(0, ...[...jobs.values()].map(j => j.number || 0));
 }
 function saveJob(j) { fs.mkdirSync(path.join(JOBS, j.id), { recursive: true }); const f = path.join(JOBS, j.id, 'job.json'); fs.writeFileSync(f, JSON.stringify(j, null, 2)); jobs.set(j.id, j); if (!j.test) persist(f); }
-function publicJob(j) { const { id, number, status, theme, themeName, variant, createdAt, readyAt, error, attempts, position } = j; return { id, number, status, theme, themeName, variant, createdAt, readyAt, error, attempts, position }; }
+function publicJob(j) { const { id, number, status, theme, themeName, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset } = j; return { id, number, status, theme, themeName, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset }; }
 function sortedJobs() { return [...jobs.values()].sort((a, b) => (a.priority || 0) - (b.priority || 0) || a.createdAt - b.createdAt); }
 function queuePosition(id) { let n = 0; for (const j of sortedJobs()) { if (['pending', 'processing', 'ready', 'drawing'].includes(j.status)) { n++; if (j.id === id) return n; } } return null; }
 
@@ -171,12 +171,14 @@ app.get('/api/jobs/:id', (req, res) => { const j = jobs.get(req.params.id); if (
 app.get('/api/jobs/:id/art', async (req, res) => { const f = path.join(JOBS, req.params.id, req.query.thumb ? 'art-thumb.png' : 'art.png'); if (await ensureLocal(f)) res.sendFile(f); else res.status(404).end(); });
 
 // ----- operator (studio) — unauthenticated on purpose: it only reads art and reports progress; the laptop is yours -----
-app.get('/api/queue', (req, res) => { res.json({ settings: getSettings(), jobs: sortedJobs().filter(j => j.status !== 'done' && j.status !== 'skipped').map(publicJob), done: sortedJobs().filter(j => j.status === 'done').slice(-10).map(publicJob) }); });
+app.get('/api/queue', (req, res) => { res.json({ settings: getSettings(), jobs: sortedJobs().filter(j => !['done', 'skipped', 'archived', 'test'].includes(j.status)).map(publicJob), done: sortedJobs().filter(j => j.status === 'done').slice(-10).map(publicJob) }); });
 app.post('/api/queue/claim', (req, res) => { // next ready -> drawing
   const j = sortedJobs().find(j => j.status === 'ready'); if (!j) return res.json({ job: null });
   j.status = 'drawing'; j.drawStartedAt = Date.now(); saveJob(j); res.json({ job: publicJob(j) });
 });
-app.post('/api/jobs/:id/status', (req, res) => { const j = jobs.get(req.params.id); if (!j) return res.status(404).end(); const st = String(req.body.status); if (!['done', 'ready', 'skipped', 'failed'].includes(st)) return res.status(400).end(); j.status = st; if (st === 'done') j.doneAt = Date.now(); if (req.body.error) j.error = String(req.body.error); saveJob(j); res.json(publicJob(j)); });
+app.post('/api/jobs/:id/status', (req, res) => { const j = jobs.get(req.params.id); if (!j) return res.status(404).end(); const st = String(req.body.status); if (!['done', 'ready', 'skipped', 'failed'].includes(st)) return res.status(400).end(); j.status = st; if (st === 'done') j.doneAt = Date.now(); if (req.body.error) j.error = String(req.body.error); else if (st === 'done') j.error = null;
+  for (const k of ['drawSeconds', 'strokes', 'widthMm']) if (req.body[k] != null && isFinite(+req.body[k])) j[k] = Math.round(+req.body[k] * 10) / 10; if (req.body.preset) j.preset = String(req.body.preset).slice(0, 60); // draw-time log
+  saveJob(j); res.json(publicJob(j)); });
 
 // ----- admin -----
 app.post('/api/admin/login', (req, res) => { if ((req.body.password || '') === ADMIN_PASSWORD) res.json({ ok: true, token: ADMIN_PASSWORD }); else res.status(401).json({ error: 'wrong password' }); });
@@ -212,9 +214,24 @@ app.post('/api/admin/jobs/:id', adminAuth, (req, res) => { // actions: retry, fr
   if (a === 'retry') { j.status = 'pending'; j.attempts = 0; j.error = null; }
   else if (a === 'front') { j.priority = -Date.now(); }
   else if (a === 'skip') { j.status = 'skipped'; }
+  else if (a === 'archive') { j.status = 'archived'; } // out of every list, photo + art kept
   else if (a === 'requeue') { j.status = (j.readyAt || fs.existsSync(path.join(JOBS, j.id, 'art.png'))) ? 'ready' : 'pending'; }
   else if (a === 'delete') { jobs.delete(j.id); fs.rmSync(path.join(JOBS, j.id), { recursive: true, force: true }); unpersist(path.join(JOBS, j.id)); return res.json({ ok: true }); }
   saveJob(j); pump(); res.json(publicJob(j));
+});
+app.post('/api/admin/jobs-bulk', adminAuth, (req, res) => { // { ids: [...], action: 'archive' | 'delete' | 'requeue' | 'skip' }
+  const ids = Array.isArray(req.body.ids) ? req.body.ids : [], a = req.body.action; let n = 0;
+  for (const id of ids) { const j = jobs.get(id); if (!j) continue; n++;
+    if (a === 'delete') { jobs.delete(j.id); fs.rmSync(path.join(JOBS, j.id), { recursive: true, force: true }); unpersist(path.join(JOBS, j.id)); continue; }
+    if (a === 'archive') j.status = 'archived'; else if (a === 'skip') j.status = 'skipped'; else if (a === 'requeue') j.status = (j.readyAt || fs.existsSync(path.join(JOBS, j.id, 'art.png'))) ? 'ready' : 'pending';
+    saveJob(j); }
+  pump(); res.json({ ok: true, n });
+});
+app.get('/api/admin/drawlog.csv', adminAuth, (req, res) => { // every drawing that finished, oldest first
+  const rows = sortedJobs().filter(j => j.doneAt && !j.test).map(j => [j.number, j.themeName, VARIANT_LABELS[j.variant] || j.variant, new Date(j.createdAt).toISOString(), new Date(j.doneAt).toISOString(), j.widthMm ? (j.widthMm / 25.4).toFixed(2) : '', j.strokes || '', j.drawSeconds || '', j.preset || '', j.status]);
+  const esc = v => /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
+  res.setHeader('content-type', 'text/csv'); res.setHeader('content-disposition', 'attachment; filename="sketchy-draw-log.csv"');
+  res.send(['number,theme,variant,photo_taken,drawn_at,width_in,strokes,draw_seconds,speed_preset,status', ...rows.map(r => r.map(esc).join(','))].join('\n'));
 });
 app.get('/api/jobs/:id/photo', adminAuth, async (req, res) => { const f = path.join(JOBS, req.params.id, 'photo.jpg'); if (await ensureLocal(f)) res.sendFile(f); else res.status(404).end(); });
 
