@@ -21,6 +21,10 @@
   .theme{border:1px solid var(--line);border-radius:12px;overflow:hidden;cursor:pointer;background:#fff;text-align:center}.theme img,.theme .ph{width:100%;aspect-ratio:1;object-fit:contain;background:#fff;display:block}.theme .ph{display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:40px}.theme .nm{padding:8px;font-weight:700}.theme.off{opacity:.5}
   .theme.on{outline:3px solid var(--blue)}
   .row{display:flex;gap:10px;align-items:center;margin:8px 0;flex-wrap:wrap}.row label{min-width:170px;color:var(--mut)}
+  .labGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-top:12px}
+  .lab{border:1px solid var(--line);border-radius:12px;background:#fff;overflow:hidden;display:flex;flex-direction:column}.lab img{width:100%;aspect-ratio:2/3;object-fit:contain;background:#fff;display:block}.lab .b{padding:8px 10px;font-size:12.5px;display:flex;flex-direction:column;gap:6px}.lab .m{font-weight:700}.lab .p{color:var(--mut);max-height:3.9em;overflow:hidden;white-space:pre-wrap}.lab.applied{outline:3px solid #1a9c4c}.lab .fail{padding:14px;color:#b51f33;font-size:12.5px}
+  .modelBoxes{display:flex;flex-wrap:wrap;gap:6px 14px}.modelBoxes label{display:flex;gap:6px;align-items:center;font-size:13px;white-space:nowrap}
+  .refStrip{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}.refStrip img{height:56px;width:56px;object-fit:cover;border-radius:6px;border:2px solid transparent;cursor:pointer}.refStrip img.on{border-color:var(--blue)}
   .prompt{margin:12px 0}.prompt h3{margin:0 0 4px;font-size:13px}.prompt .cnt{float:right;color:var(--mut);font-weight:400}
   table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:middle;font-size:13px}th{color:var(--mut);font-weight:600;font-size:12px;text-transform:uppercase}
   td img{height:56px;border-radius:6px;background:#fff;border:1px solid var(--line)}
@@ -36,7 +40,7 @@
 </head>
 <body>
 <header><svg class="logo" viewBox="60 150 1870 400"></svg><span class="t">Admin</span>
-  <nav id="nav"><button data-t="queue" class="on">Queue</button><button data-t="themes">Themes</button><button data-t="test">Test a prompt</button><button data-t="settings">Settings</button><a href="/studio" target="_blank"><button>Open Plotter Studio ↗</button></a></nav></header>
+  <nav id="nav"><button data-t="queue" class="on">Queue</button><button data-t="themes">Themes</button><button data-t="test">Prompt Lab</button><button data-t="settings">Settings</button><a href="/studio" target="_blank"><button>Open Plotter Studio ↗</button></a></nav></header>
 <main>
   <div class="login card" id="login"><h2>Admin password</h2><input type="password" id="pw" placeholder="password"><div class="row" style="margin-top:10px"><button class="primary" id="loginBtn">Sign in</button><span id="loginErr" class="bad"></span></div></div>
 
@@ -65,7 +69,8 @@
       <div class="row"><label>Show on iPad</label><input type="checkbox" id="teEnabled"></div>
       <div class="row"><label>Order (lower = first)</label><input type="number" id="teOrder" style="max-width:100px"></div>
       <div class="row"><label>Image model for this theme</label><select id="teModel" style="max-width:300px"></select><span class="note">Blank = the model in Settings. Pick one here if it draws this theme better.</span></div>
-      <div class="row"><label>Quality for this theme</label><select id="teQuality"><option value="">(use Settings)</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="auto">auto</option></select></div>
+      <div class="row"><label>Quality for this theme</label><select id="teQuality"><option value="">(use Settings)</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="auto">auto</option></select>
+        <label style="width:auto;margin-left:14px">Moderation</label><select id="teMod"><option value="">(use Settings)</option><option value="low">low</option><option value="auto">auto</option></select><span class="note">Each combination can also pick its own model below — that wins over these.</span></div>
       <div class="row"><label>Thumbnail (any shape; shown whole)</label><input type="file" id="teThumb" accept="image/*"><img id="teThumbPrev" style="height:90px;max-width:160px;object-fit:contain;background:#fff;border-radius:8px;border:1px solid var(--line)"></div>
       <p class="note">Paste the locked-in master prompt for each combination. Leave a box empty and that option won't be offered on the iPad for this theme. Each prompt must stand on its own (style, line weight, white background, no shading…) — the guest's photo is attached as the input image.</p>
       <div id="prompts"></div>
@@ -74,16 +79,20 @@
   </section>
 
   <section class="tab" id="tab-test">
-    <div class="card"><h2>Test a prompt (does not go to the robot)</h2>
-      <div class="row"><label>Theme</label><select id="tTheme" style="max-width:260px"></select></div>
-      <div class="row"><label>Combination</label><select id="tVar" style="max-width:260px"></select></div>
-      <div class="row"><label>Photo</label><input type="file" id="tPhoto" accept="image/*"></div>
-      <div class="row"><label>Model (this test only)</label><select id="tModel" style="max-width:300px"><option value="">(use the theme's model, else Settings)</option></select><button id="tModels">List models on my key</button></div>
-      <div class="row"><label>Quality (this test only)</label><select id="tQuality" style="max-width:200px"><option value="">(use Settings)</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option></select></div>
-      <div class="row"><label>Input fidelity (this test only)</label><select id="tFid" style="max-width:200px"><option value="">(use Settings)</option><option value="high">high</option><option value="low">low</option></select></div>
+    <div class="card"><h2>Prompt Lab <span class="note">write a prompt, try it on one face with one or many models, keep the winner</span></h2>
+      <div class="row"><label>Theme</label><select id="tTheme" style="max-width:280px"></select><span class="note">New themes start inactive — guests only see a theme once you tick Enabled in Themes.</span></div>
+      <div class="row"><label>Combination</label><select id="tVar" style="max-width:280px"></select><span class="note" id="tBoxState"></span></div>
+      <div class="row" style="align-items:flex-start"><label>Reference photo</label><div style="flex:1"><input type="file" id="tPhoto" accept="image/*"> <span class="note" id="tPhotoNote"></span><div id="refStrip" class="refStrip"></div></div></div>
+      <div class="row" style="align-items:flex-start"><label>Prompt</label><div style="flex:1"><textarea id="tPrompt" style="width:100%;min-height:150px" placeholder="Write the master prompt here. It is applied to the reference photo exactly as the guest's photo will be."></textarea><div class="note"><span id="tPromptCnt"></span> <button id="tPromptLoad" style="padding:2px 8px;min-height:0;font-size:12px">Load the saved prompt for this combination</button></div></div></div>
+      <div class="row" style="align-items:flex-start"><label>Models</label><div style="flex:1"><div id="tModelBoxes" class="modelBoxes"></div><div class="note"><button id="tAll" style="padding:2px 8px;min-height:0;font-size:12px">All</button> <button id="tNone" style="padding:2px 8px;min-height:0;font-size:12px">None</button> <button id="tModels" style="padding:2px 8px;min-height:0;font-size:12px">Refresh list from my key</button></div></div></div>
+      <div class="row"><label>Quality</label><select id="tQuality" style="max-width:200px"><option value="">(use Settings)</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="auto">auto</option></select>
+        <label style="width:auto;margin-left:14px">Moderation</label><select id="tMod" style="max-width:160px"><option value="">(use Settings)</option><option value="low">low</option><option value="auto">auto</option></select>
+        <label style="width:auto;margin-left:14px">Input fidelity</label><select id="tFid" style="max-width:160px"><option value="">(use Settings)</option><option value="high">high</option><option value="low">low</option></select></div>
       <div class="row"><button class="primary" id="tRun">Generate</button><span id="tMsg" class="note"></span></div>
-      <div id="testOut"></div>
-      <p class="note">Happy with it? The result can be sent to the robot queue with the button that appears under the image.</p>
+      <div id="labOut" class="labGrid"></div>
+    </div>
+    <div class="card"><h2>Earlier results <span class="note">last 80 — click "Use this" on any card to make it a theme's master prompt + model</span> <label class="note" style="margin-left:auto;display:flex;gap:6px;align-items:center"><input type="checkbox" id="labOnlyTheme" checked> only this theme</label></h2>
+      <div id="labHist" class="labGrid"></div>
     </div>
   </section>
 
@@ -95,6 +104,7 @@
       <div class="row"><label>Quality</label><select id="sQuality" style="max-width:200px"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="auto">auto</option></select></div>
       <div class="row"><label>Output size</label><select id="sSize" style="max-width:200px"><option value="1024x1536">1024×1536 portrait</option><option value="1024x1024">1024×1024 square</option><option value="1536x1024">1536×1024 landscape</option><option value="auto">auto</option></select></div>
       <div class="row"><label>Input fidelity</label><select id="sFid" style="max-width:200px"><option value="">(model default)</option><option value="high">high — keeps the face closer to the photo (gpt-image-1.5 only)</option><option value="low">low</option></select></div>
+      <div class="row"><label>Content moderation</label><select id="sMod" style="max-width:200px"><option value="low">low (less restrictive) — default</option><option value="auto">auto (OpenAI's standard filter)</option></select><span class="note">"low" loosens the image filter for themes like zombies or horror; outright refusals still come back as a failed job with the reason.</span></div>
       <div class="row"><label>Photos processed at once</label><input type="number" id="sConc" min="1" max="5" style="max-width:100px"></div>
     </div>
     <div class="card"><h2>Event</h2>
@@ -122,7 +132,7 @@
     try { STATE = await api('/api/admin/state'); } catch (e) { return; }
     $('login').style.display = 'none';
     renderQueue(); renderThemes(); renderSettings(); renderTest();
-    if (!refresh.modelsLoaded) { refresh.modelsLoaded = true; loadModels(false); }
+    if (!refresh.modelsLoaded) { refresh.modelsLoaded = true; loadModels(false); loadLab(); }
   }
   // ----- queue -----
   const fmt = ms => { const d = new Date(ms); return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
@@ -174,28 +184,57 @@
     const t = STATE.themes.find(x => x.slug === slug); if (!t) { editing = null; $('themeEdit').style.display = 'none'; return; }
     editing = slug; $('themeEdit').style.display = '';
     if (!keep) { $('teName').textContent = t.name; $('teNameIn').value = t.name; $('teEnabled').checked = t.enabled !== false; $('teOrder').value = t.order || 0;
-      if (t.model && ![...$('teModel').options].some(o => o.value === t.model)) $('teModel').insertAdjacentHTML('beforeend', `<option value="${t.model}">${t.model}</option>`); $('teModel').value = t.model || ''; $('teQuality').value = t.quality || '';
-      $('prompts').innerHTML = STATE.variantOrder.map(v => `<div class="prompt"><h3>${STATE.variants[v]} <span class="cnt" id="cnt-${v}"></span></h3><textarea data-v="${v}" placeholder="Paste the master prompt for: ${STATE.variants[v]}">${t.prompts[v] || ''}</textarea></div>`).join('');
+      if (t.model && ![...$('teModel').options].some(o => o.value === t.model)) $('teModel').insertAdjacentHTML('beforeend', `<option value="${t.model}">${t.model}</option>`); $('teModel').value = t.model || ''; $('teQuality').value = t.quality || ''; $('teMod').value = t.moderation || '';
+      $('prompts').innerHTML = STATE.variantOrder.map(v => { const vm = t.variantModels[v] || {}; return `<div class="prompt"><h3>${STATE.variants[v]} <span class="cnt" id="cnt-${v}"></span></h3><textarea data-v="${v}" placeholder="Paste the master prompt for: ${STATE.variants[v]} — or build it in the Prompt Lab">${t.prompts[v] || ''}</textarea><div class="note" style="margin-top:4px">Model for this combination: <select class="vmModel" data-v="${v}" style="max-width:260px"></select> quality <select class="vmQ" data-v="${v}"><option value="">(default)</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="auto">auto</option></select></div></div>`; }).join('');
+      $('prompts').querySelectorAll('.vmModel').forEach(sel => { const vm = t.variantModels[sel.dataset.v] || {}; sel.innerHTML = '<option value="">(theme default)</option>' + Array.from(new Set(MODELS.concat(vm.model ? [vm.model] : []))).sort().map(m => `<option value="${m}">${m}</option>`).join(''); sel.value = vm.model || ''; });
+      $('prompts').querySelectorAll('.vmQ').forEach(sel => { sel.value = (t.variantModels[sel.dataset.v] || {}).quality || ''; });
       $('prompts').querySelectorAll('textarea').forEach(ta => { const up = () => $('cnt-' + ta.dataset.v).textContent = ta.value.trim() ? ta.value.length + ' chars' : 'empty — not offered'; ta.oninput = up; up(); });
       document.querySelectorAll('.theme').forEach(d => d.classList.toggle('on', d.dataset.s === slug)); }
     $('teThumbPrev').src = t.hasThumb ? `/api/themes/${slug}/thumb?v=${Date.now()}` : ''; $('teThumbPrev').style.display = t.hasThumb ? '' : 'none';
   }
   $('addTheme').onclick = async () => { const name = $('newName').value.trim(); if (!name) return; const t = await api('/api/admin/themes', { method: 'POST', json: { name } }); $('newName').value = ''; editing = t.slug; await refresh(); openTheme(t.slug); toast('Theme "' + name + '" created — add prompts and a thumbnail, then Save'); };
-  $('teSave').onclick = async () => { try { const prompts = {}; $('prompts').querySelectorAll('textarea').forEach(ta => prompts[ta.dataset.v] = ta.value); await api('/api/admin/themes/' + editing, { method: 'PUT', json: { name: $('teNameIn').value.trim() || 'Theme', enabled: $('teEnabled').checked, order: +$('teOrder').value || 0, model: $('teModel').value, quality: $('teQuality').value, prompts } }); $('teMsg').textContent = 'Saved ✓'; toast('Theme "' + ($('teNameIn').value.trim() || 'Theme') + '" saved — prompts are live on the iPad'); setTimeout(() => $('teMsg').textContent = '', 4000); await refresh(); } catch (e) { toast('Save failed: ' + e.message, 'bad'); } };
+  $('teSave').onclick = async () => { try { const prompts = {}; $('prompts').querySelectorAll('textarea').forEach(ta => prompts[ta.dataset.v] = ta.value); const variantModels = {}; $('prompts').querySelectorAll('.vmModel').forEach(sel => { variantModels[sel.dataset.v] = { model: sel.value, quality: $('prompts').querySelector(`.vmQ[data-v="${sel.dataset.v}"]`).value }; }); await api('/api/admin/themes/' + editing, { method: 'PUT', json: { name: $('teNameIn').value.trim() || 'Theme', enabled: $('teEnabled').checked, order: +$('teOrder').value || 0, model: $('teModel').value, quality: $('teQuality').value, moderation: $('teMod').value, prompts, variantModels } }); $('teMsg').textContent = 'Saved ✓'; toast('Theme "' + ($('teNameIn').value.trim() || 'Theme') + '" saved — prompts are live on the iPad'); setTimeout(() => $('teMsg').textContent = '', 4000); await refresh(); } catch (e) { toast('Save failed: ' + e.message, 'bad'); } };
   $('teDelete').onclick = async () => { if (!confirm('Delete this theme and all its prompts?')) return; await api('/api/admin/themes/' + editing, { method: 'DELETE' }); editing = null; $('themeEdit').style.display = 'none'; refresh(); toast('Theme deleted'); };
   $('teThumb').onchange = async () => { const f = $('teThumb').files[0]; if (!f) return; const fd = new FormData(); fd.append('thumb', f); try { await api('/api/admin/themes/' + editing + '/thumb', { method: 'POST', body: fd }); toast('Thumbnail updated'); } catch (e) { toast('Thumbnail upload failed: ' + e.message, 'bad'); } $('teThumb').value = ''; refresh(); };
   // ----- test -----
-  function renderTest() { const cur = $('tTheme').value; $('tTheme').innerHTML = STATE.themes.map(t => `<option value="${t.slug}">${t.name}</option>`).join(''); if (cur) $('tTheme').value = cur; fillVars(); }
-  function fillVars() { const t = STATE.themes.find(x => x.slug === $('tTheme').value); const cur = $('tVar').value; $('tVar').innerHTML = STATE.variantOrder.map(v => `<option value="${v}" ${t && !t.prompts[v].trim() ? 'disabled' : ''}>${STATE.variants[v]}${t && !t.prompts[v].trim() ? ' (no prompt)' : ''}</option>`).join(''); if (cur) $('tVar').value = cur; }
-  $('tTheme').onchange = fillVars;
+  // ----- Prompt Lab -----
+  let LAB = { results: [], ref: null }; // ref: lab job id whose photo to reuse
+  function renderTest() { const cur = $('tTheme').value; $('tTheme').innerHTML = STATE.themes.map(t => `<option value="${t.slug}">${t.name}${t.enabled === false ? ' (inactive)' : ''}</option>`).join(''); if (cur) $('tTheme').value = cur; fillVars(); }
+  function fillVars() { const t = STATE.themes.find(x => x.slug === $('tTheme').value); const cur = $('tVar').value; $('tVar').innerHTML = STATE.variantOrder.map(v => `<option value="${v}">${STATE.variants[v]}${t && !t.prompts[v].trim() ? ' (no prompt yet)' : ''}</option>`).join(''); if (cur) $('tVar').value = cur; boxState(); }
+  function boxState() { const t = STATE.themes.find(x => x.slug === $('tTheme').value); if (!t) return; const v = $('tVar').value, vm = t.variantModels[v] || {}; $('tBoxState').textContent = t.prompts[v].trim() ? `saved: ${t.prompts[v].length} chars · model ${vm.model || t.model || 'Settings'}` : 'nothing saved yet for this combination'; if (!$('tPrompt').value.trim()) $('tPrompt').value = t.prompts[v] || ''; cnt(); renderHist(); }
+  const cnt = () => $('tPromptCnt').textContent = $('tPrompt').value.length + ' chars';
+  $('tPrompt').oninput = cnt;
+  $('tTheme').onchange = () => { $('tPrompt').value = ''; fillVars(); }; $('tVar').onchange = () => { $('tPrompt').value = ''; boxState(); };
+  $('tPromptLoad').onclick = () => { const t = STATE.themes.find(x => x.slug === $('tTheme').value); if (t) { $('tPrompt').value = t.prompts[$('tVar').value] || ''; cnt(); } };
+  $('tAll').onclick = () => document.querySelectorAll('#tModelBoxes input').forEach(i => i.checked = true);
+  $('tNone').onclick = () => document.querySelectorAll('#tModelBoxes input').forEach(i => i.checked = false);
+  $('tPhoto').onchange = () => { LAB.ref = null; $('tPhotoNote').textContent = $('tPhoto').files[0] ? 'new photo: ' + $('tPhoto').files[0].name : ''; document.querySelectorAll('#refStrip img').forEach(i => i.classList.remove('on')); };
+  function renderRefs() { const seen = new Set(), refs = []; for (const r of LAB.results) { const k = r.batch || r.photo; if (!seen.has(k)) { seen.add(k); refs.push(r); } } $('refStrip').innerHTML = refs.slice(0, 12).map(r => `<img src="${r.photo}?token=${encodeURIComponent(TOKEN)}" title="reuse this reference photo" data-id="${r.id}" class="${LAB.ref === r.id ? 'on' : ''}">`).join(''); $('refStrip').querySelectorAll('img').forEach(i => i.onclick = () => { LAB.ref = i.dataset.id; $('tPhoto').value = ''; $('tPhotoNote').textContent = 'reusing an earlier reference photo'; document.querySelectorAll('#refStrip img').forEach(x => x.classList.toggle('on', x === i)); }); }
+  function labCard(r) { const tgt = `${r.themeName} · ${STATE.variants[r.variant] || r.variant}`; const here = r.theme === $('tTheme').value && r.variant === $('tVar').value;
+    return `<div class="lab ${r.applied ? 'applied' : ''}" data-id="${r.id}">${r.art ? `<a href="${r.art}" target="_blank"><img src="${r.art}?thumb=1&v=${r.createdAt}"></a>` : `<div class="fail">✗ ${r.error || 'failed'}</div>`}<div class="b">
+      <div class="m">${r.model}${r.used ? ` · ${r.used.quality}` : ''}${r.seconds ? ` · ${r.seconds}s` : ''}${r.droppedParam ? ` <span class="note">(no ${r.droppedParam})</span>` : ''}</div>
+      <div class="note">${tgt}${r.applied ? ' · <b style="color:#1a9c4c">in use ✓</b>' : ''}</div>
+      <div class="p" title="${r.prompt.replace(/"/g, '&quot;')}">${r.prompt}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">${r.art ? `<button class="primary" data-apply="${r.id}" title="Make this the master prompt and model for ${here ? 'this' : 'its'} combination">Use this${here ? '' : ' for ' + tgt}</button><a href="${r.art}" download="lab-${r.model}.png"><button>PNG</button></a><button data-queue="${r.id}">To robot</button>` : ''}<button data-prompt="${r.id}" title="Put this prompt back in the editor">Edit prompt</button><button data-del="${r.id}" class="danger">✕</button></div></div></div>`; }
+  function wireCards(root) {
+    root.querySelectorAll('button[data-apply]').forEach(b => b.onclick = async () => { const r = LAB.results.find(x => x.id === b.dataset.apply); const t = STATE.themes.find(x => x.slug === r.theme); const old = t && t.prompts[r.variant].trim(); if (old && old !== r.prompt.trim() && !confirm(`${r.themeName} · ${STATE.variants[r.variant]} already has a prompt. Replace it with this one (and set model ${r.model})?`)) return;
+      try { await api('/api/admin/lab/' + r.id + '/apply', { method: 'POST', json: {} }); toast(`${r.themeName} · ${STATE.variants[r.variant]} now uses this prompt + ${r.model}`); await refresh(); await loadLab(); } catch (e) { toast('Could not apply: ' + e.message, 'bad'); } });
+    root.querySelectorAll('button[data-queue]').forEach(b => b.onclick = async () => { await api('/api/admin/jobs/' + b.dataset.queue, { method: 'POST', json: { action: 'requeue' } }); b.textContent = 'Queued ✓'; b.disabled = true; });
+    root.querySelectorAll('button[data-prompt]').forEach(b => b.onclick = () => { const r = LAB.results.find(x => x.id === b.dataset.prompt); $('tTheme').value = r.theme; fillVars(); $('tVar').value = r.variant; $('tPrompt').value = r.prompt; cnt(); boxState(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+    root.querySelectorAll('button[data-del]').forEach(b => b.onclick = async () => { await api('/api/admin/lab/' + b.dataset.del, { method: 'DELETE' }); await loadLab(); });
+  }
+  function renderHist() { const onlyTheme = $('labOnlyTheme').checked, th = $('tTheme').value; const shown = new Set(Array.from($('labOut').querySelectorAll('.lab')).map(d => d.dataset.id)); const rs = LAB.results.filter(r => !shown.has(r.id) && (!onlyTheme || r.theme === th)); $('labHist').innerHTML = rs.map(labCard).join('') || '<div class="note">No earlier results' + (onlyTheme ? ' for this theme' : '') + '.</div>'; wireCards($('labHist')); renderRefs(); }
+  $('labOnlyTheme').onchange = renderHist;
+  async function loadLab() { try { LAB.results = (await api('/api/admin/lab')).results; } catch (_) { LAB.results = []; } const ids = new Set(Array.from($('labOut').querySelectorAll('.lab')).map(d => d.dataset.id)); $('labOut').innerHTML = LAB.results.filter(r => ids.has(r.id)).map(labCard).join(''); wireCards($('labOut')); renderHist(); }
   $('tRun').onclick = async () => {
-    const f = $('tPhoto').files[0]; if (!f) return alert('Choose a photo first');
-    $('tRun').disabled = true; $('tMsg').textContent = 'Generating… (20–60 s)'; $('testOut').innerHTML = ''; const t0 = Date.now();
-    try { const fd = new FormData(); fd.append('photo', f); fd.append('theme', $('tTheme').value); fd.append('variant', $('tVar').value); if ($('tModel').value) fd.append('model', $('tModel').value); if ($('tQuality').value) fd.append('quality', $('tQuality').value); if ($('tFid').value) fd.append('inputFidelity', $('tFid').value);
-      const r = await api('/api/admin/test', { method: 'POST', body: fd });
-      $('tMsg').textContent = `Done in ${r.seconds} s · model ${r.used.model} · quality ${r.used.quality} · fidelity ${r.used.inputFidelity || 'default'}`; $('testOut').innerHTML = `<img src="${r.art}?v=${Date.now()}"><div class="row"><a href="${r.art}" download="test-line-art.png"><button>Download PNG</button></a><button class="primary" id="tQueue">Send this one to the robot queue</button></div>`;
-      $('tQueue').onclick = async () => { await api('/api/admin/jobs/' + r.id, { method: 'POST', json: { action: 'requeue' } }); $('tQueue').textContent = 'Queued ✓'; $('tQueue').disabled = true; };
-    } catch (e) { $('tMsg').textContent = ''; $('testOut').innerHTML = `<p class="bad">${e.message}</p>`; }
+    const models = Array.from(document.querySelectorAll('#tModelBoxes input:checked')).map(i => i.value); const f = $('tPhoto').files[0];
+    if (!models.length) return toast('Tick at least one model', 'bad'); if (!f && !LAB.ref) return toast('Add a reference photo', 'bad'); if (!$('tPrompt').value.trim()) return toast('Write a prompt first', 'bad');
+    $('tRun').disabled = true; $('tMsg').textContent = `Generating with ${models.length} model${models.length > 1 ? 's' : ''}… (${models.length > 1 ? 'they run at the same time; ' : ''}usually 30–90 s)`;
+    try { const fd = new FormData(); if (f) fd.append('photo', f); else fd.append('refJob', LAB.ref); fd.append('theme', $('tTheme').value); fd.append('variant', $('tVar').value); fd.append('prompt', $('tPrompt').value); fd.append('models', JSON.stringify(models)); for (const [k, id] of [['quality', 'tQuality'], ['moderation', 'tMod'], ['inputFidelity', 'tFid']]) if ($(id).value) fd.append(k, $(id).value);
+      const r = await api('/api/admin/lab', { method: 'POST', body: fd });
+      LAB.results = r.results.concat(LAB.results); $('labOut').innerHTML = r.results.map(labCard).join('') + $('labOut').innerHTML; wireCards($('labOut'));
+      const ok = r.results.filter(x => x.art).length; $('tMsg').textContent = `${ok} of ${r.results.length} finished — pick the one you like and press "Use this"`; renderHist(); await loadLab();
+    } catch (e) { $('tMsg').textContent = ''; toast('Generation failed: ' + e.message, 'bad'); }
     $('tRun').disabled = false;
   };
   const KNOWN_MODELS = ['chatgpt-image-latest', 'gpt-image-2-2026-04-21', 'gpt-image-2', 'gpt-image-1.5', 'gpt-image-1-mini'];
@@ -204,15 +243,16 @@
     const saved = (STATE.settings && STATE.settings.model) || '';
     const list = Array.from(new Set(MODELS.concat(saved ? [saved] : []))).sort();
     const opts = list.map(m => `<option value="${m}">${m}${m === 'chatgpt-image-latest' ? ' (same as ChatGPT)' : ''}</option>`).join('');
-    const t = $('tModel').value; $('tModel').innerHTML = '<option value="">(use the theme\'s model, else Settings)</option>' + opts; $('tModel').value = list.includes(t) ? t : '';
     $('sModel').innerHTML = opts; $('sModel').value = saved || list[0];
     const te = $('teModel').value; $('teModel').innerHTML = '<option value="">(use Settings)</option>' + opts; $('teModel').value = list.includes(te) ? te : '';
+    const ticked = new Set(Array.from(document.querySelectorAll('#tModelBoxes input:checked')).map(i => i.value)); if (!ticked.size) ticked.add(saved);
+    $('tModelBoxes').innerHTML = list.map(m => `<label><input type="checkbox" value="${m}" ${ticked.has(m) ? 'checked' : ''}> ${m}</label>`).join('');
   }
-  async function loadModels(show) { try { const r = await api('/api/admin/models'); MODELS = r.models; fillModels(); if (show) $('tMsg').textContent = r.models.length + ' image models available'; } catch (e) { if (show) $('tMsg').textContent = e.message; } }
+  async function loadModels(show) { try { const r = await api('/api/admin/models'); MODELS = Array.isArray(r.models) && r.models.length ? r.models : KNOWN_MODELS; fillModels(); if (show) $('tMsg').textContent = r.models.length + ' image models available'; } catch (e) { if (show) $('tMsg').textContent = e.message; } }
   $('tModels').onclick = async () => { $('tModels').disabled = true; await loadModels(true); $('tModels').disabled = false; };
   // ----- settings -----
-  function renderSettings() { const s = STATE.settings; $('durState').innerHTML = STATE.readOnly ? '<span class="bad">⚠ dev workspace — changes here are NOT saved to the live app</span>' : STATE.durable ? '<span class="ok">✓ bucket connected — saved settings and themes persist across redeploys</span>' : '<span class="bad">✗ local disk only</span>'; $('keyState').innerHTML = STATE.hasKey ? '<span class="ok">✓ set</span>' : '<span class="bad">✗ missing</span>'; fillModels(); $('sQuality').value = s.quality; $('sSize').value = s.size; $('sFid').value = s.inputFidelity || ''; $('sConc').value = s.concurrency; $('sEvent').value = s.eventName || ''; $('sZoom').value = s.cameraZoom || 1.6; }
-  $('sSave').onclick = async () => { await api('/api/admin/settings', { method: 'POST', json: { model: $('sModel').value, quality: $('sQuality').value, size: $('sSize').value, inputFidelity: $('sFid').value, concurrency: +$('sConc').value || 1, eventName: $('sEvent').value, cameraZoom: Math.min(3, Math.max(1, +$('sZoom').value || 1.6)) } }); $('sMsg').textContent = 'Saved ✓'; toast(STATE.readOnly ? 'Saved on this test server only — not the live app' : 'Settings saved', STATE.readOnly ? 'bad' : 'ok'); setTimeout(() => $('sMsg').textContent = '', 4000); };
+  function renderSettings() { const s = STATE.settings; $('durState').innerHTML = STATE.readOnly ? '<span class="bad">⚠ dev workspace — changes here are NOT saved to the live app</span>' : STATE.durable ? '<span class="ok">✓ bucket connected — saved settings and themes persist across redeploys</span>' : '<span class="bad">✗ local disk only</span>'; $('keyState').innerHTML = STATE.hasKey ? '<span class="ok">✓ set</span>' : '<span class="bad">✗ missing</span>'; fillModels(); $('sQuality').value = s.quality; $('sSize').value = s.size; $('sFid').value = s.inputFidelity || ''; $('sMod').value = s.moderation || 'low'; $('sConc').value = s.concurrency; $('sEvent').value = s.eventName || ''; $('sZoom').value = s.cameraZoom || 1.6; }
+  $('sSave').onclick = async () => { await api('/api/admin/settings', { method: 'POST', json: { model: $('sModel').value, quality: $('sQuality').value, size: $('sSize').value, inputFidelity: $('sFid').value, moderation: $('sMod').value, concurrency: +$('sConc').value || 1, eventName: $('sEvent').value, cameraZoom: Math.min(3, Math.max(1, +$('sZoom').value || 1.6)) } }); $('sMsg').textContent = 'Saved ✓'; toast(STATE.readOnly ? 'Saved on this test server only — not the live app' : 'Settings saved', STATE.readOnly ? 'bad' : 'ok'); setTimeout(() => $('sMsg').textContent = '', 4000); };
   if (TOKEN) refresh(); else showLogin();
   setInterval(() => { if (TOKEN && $('tab-queue').classList.contains('on')) refresh(); }, 5000);
 })();

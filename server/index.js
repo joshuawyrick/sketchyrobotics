@@ -58,7 +58,7 @@ const OPENAI_BASE = process.env.OPENAI_BASE || 'https://api.openai.com';
 
 // ---------- settings ----------
 const SETTINGS_FILE = path.join(DATA, 'settings.json');
-const DEFAULT_SETTINGS = { model: 'gpt-image-2-2026-04-21', quality: 'medium', size: '1024x1536', inputFidelity: '', concurrency: 2, autoRun: true, pauseBetween: true, eventName: 'Sketchy Robotics', cameraZoom: 1.6 };
+const DEFAULT_SETTINGS = { model: 'gpt-image-2-2026-04-21', quality: 'medium', size: '1024x1536', inputFidelity: '', moderation: 'low', concurrency: 2, autoRun: true, pauseBetween: true, eventName: 'Sketchy Robotics', cameraZoom: 1.6 };
 function getSettings() { try { return Object.assign({}, DEFAULT_SETTINGS, JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))); } catch (_) { return Object.assign({}, DEFAULT_SETTINGS); } }
 function saveSettings(s) { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2)); persist(SETTINGS_FILE); }
 
@@ -71,13 +71,14 @@ function readTheme(slug) {
   const dir = path.join(THEMES, slug); if (!fs.existsSync(path.join(dir, 'theme.json'))) return null;
   const t = JSON.parse(fs.readFileSync(path.join(dir, 'theme.json'), 'utf8')); t.slug = slug;
   t.prompts = {}; for (const v of VARIANTS) { const f = path.join(dir, 'prompts', v + '.txt'); t.prompts[v] = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : ''; }
-  t.hasThumb = fs.existsSync(path.join(dir, 'thumb.png'));
+  t.hasThumb = fs.existsSync(path.join(dir, 'thumb.png')); t.variantModels = t.variantModels || {};
   return t;
 }
 function listThemes() { return fs.readdirSync(THEMES).map(readTheme).filter(Boolean).sort((a, b) => (a.order || 0) - (b.order || 0) || a.name.localeCompare(b.name)); }
 function writeTheme(slug, t) {
   const dir = path.join(THEMES, slug); fs.mkdirSync(path.join(dir, 'prompts'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'theme.json'), JSON.stringify({ name: t.name, enabled: t.enabled !== false, order: t.order || 0, model: t.model || '', quality: t.quality || '' }, null, 2)); persist(path.join(dir, 'theme.json')); // model/quality: blank = use Settings
+  const vm = {}; for (const v of VARIANTS) { const x = t.variantModels && t.variantModels[v]; if (x && (x.model || x.quality)) vm[v] = { model: x.model || '', quality: x.quality || '' }; }
+  fs.writeFileSync(path.join(dir, 'theme.json'), JSON.stringify({ name: t.name, enabled: t.enabled !== false, order: t.order || 0, model: t.model || '', quality: t.quality || '', moderation: t.moderation || '', variantModels: vm }, null, 2)); persist(path.join(dir, 'theme.json')); // model/quality: blank = use Settings; variantModels: per-combination overrides
   if (t.prompts) for (const v of VARIANTS) if (v in t.prompts) { const f = path.join(dir, 'prompts', v + '.txt'); fs.writeFileSync(f, String(t.prompts[v] || '')); persist(f); }
 }
 
@@ -91,37 +92,44 @@ function loadState() {
   for (const j of jobs.values()) if (j.status === 'processing') { j.status = 'pending'; } // server restarted mid-call
   seq = Math.max(0, ...[...jobs.values()].map(j => j.number || 0));
 }
-function saveJob(j) { fs.mkdirSync(path.join(JOBS, j.id), { recursive: true }); const f = path.join(JOBS, j.id, 'job.json'); fs.writeFileSync(f, JSON.stringify(j, null, 2)); jobs.set(j.id, j); if (!j.test) persist(f); }
+function saveJob(j) { fs.mkdirSync(path.join(JOBS, j.id), { recursive: true }); const f = path.join(JOBS, j.id, 'job.json'); fs.writeFileSync(f, JSON.stringify(j, null, 2)); jobs.set(j.id, j); if (!j.test || j.lab) persist(f); }
 function publicJob(j) { const { id, number, status, theme, themeName, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset } = j; return { id, number, status, theme, themeName, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset }; }
 function sortedJobs() { return [...jobs.values()].sort((a, b) => (a.priority || 0) - (b.priority || 0) || a.createdAt - b.createdAt); }
 function queuePosition(id) { let n = 0; for (const j of sortedJobs()) { if (['pending', 'processing', 'ready', 'drawing'].includes(j.status)) { n++; if (j.id === id) return n; } } return null; }
 
 // ---------- OpenAI ----------
+/** Settings ← theme override ← this combination's override ← an explicit pick (Lab) */
+function effectiveSettings(theme, variant, override) {
+  const pick = o => { const r = {}; for (const k of ['model', 'quality', 'moderation']) if (o && o[k]) r[k] = o[k]; return r; };
+  return Object.assign(getSettings(), pick(theme), pick(theme.variantModels && theme.variantModels[variant]), override || {});
+}
 async function generateArt(job, override) {
   const theme = readTheme(job.theme); if (!theme) throw new Error('theme missing');
-  const themeOv = {}; if (theme.model) themeOv.model = theme.model; if (theme.quality) themeOv.quality = theme.quality; // per-theme model beats Settings; a test's own pick beats both
-  const s = Object.assign(getSettings(), themeOv, override || {});
-  const prompt = (theme.prompts[job.variant] || '').trim(); if (!prompt) throw new Error(`no prompt saved for ${theme.name} / ${VARIANT_LABELS[job.variant]}`);
+  const s = effectiveSettings(theme, job.variant, override);
+  const prompt = (override && override.prompt != null ? String(override.prompt) : (theme.prompts[job.variant] || '')).trim(); if (!prompt) throw new Error(`no prompt saved for ${theme.name} / ${VARIANT_LABELS[job.variant]}`);
+  job.used = { model: s.model, quality: s.quality, size: s.size, inputFidelity: s.inputFidelity, moderation: s.moderation };
   if (!OPENAI_KEY) throw new Error('OPENAI_API_KEY is not set in Secrets');
   const photoFile = path.join(JOBS, job.id, 'photo.jpg'); if (!(await ensureLocal(photoFile))) throw new Error('photo missing'); const photo = fs.readFileSync(photoFile);
   const form = new FormData();
   form.append('model', s.model); form.append('prompt', prompt); form.append('n', '1');
   if (s.size) form.append('size', s.size); if (s.quality) form.append('quality', s.quality);
   if (s.inputFidelity) form.append('input_fidelity', s.inputFidelity);
+  if (s.moderation) form.append('moderation', s.moderation); // 'low' = less restrictive filter (still refuses the worst)
   form.append('output_format', 'png');
   form.append('image', new Blob([photo], { type: 'image/jpeg' }), 'photo.jpg');
-  const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 180000);
-  let res;
-  try { res = await fetch(OPENAI_BASE + '/v1/images/edits', { method: 'POST', headers: { Authorization: 'Bearer ' + OPENAI_KEY }, body: form, signal: ctrl.signal }); }
-  finally { clearTimeout(t); }
-  const body = await res.json().catch(() => ({}));
+  const call = async (f) => { const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 180000);
+    try { const r = await fetch(OPENAI_BASE + '/v1/images/edits', { method: 'POST', headers: { Authorization: 'Bearer ' + OPENAI_KEY }, body: f, signal: ctrl.signal }); return { res: r, body: await r.json().catch(() => ({})) }; } finally { clearTimeout(t); } };
+  let { res, body } = await call(form);
+  // a model that doesn't know a parameter (moderation / input_fidelity) says so in the error; drop it and try once more
+  const unknown = !res.ok && body.error && /unknown parameter|unsupported parameter|not supported|invalid.*parameter/i.test(body.error.message || '') && (body.error.message.match(/'(moderation|input_fidelity|quality)'/) || [])[1];
+  if (unknown) { form.delete(unknown); ({ res, body } = await call(form)); job.droppedParam = unknown; }
   if (!res.ok) throw new Error('OpenAI ' + res.status + ': ' + (body.error && body.error.message || JSON.stringify(body)).slice(0, 300));
   const b64 = body.data && body.data[0] && body.data[0].b64_json; if (!b64) throw new Error('OpenAI returned no image');
   // normalise: flatten onto white, make sure it's a clean PNG the tracer likes
   const png = await sharp(Buffer.from(b64, 'base64')).flatten({ background: '#ffffff' }).png().toBuffer();
   fs.writeFileSync(path.join(JOBS, job.id, 'art.png'), png);
   await sharp(png).resize(400, 400, { fit: 'inside' }).png().toFile(path.join(JOBS, job.id, 'art-thumb.png'));
-  if (!job.test) { persist(path.join(JOBS, job.id, 'art.png')); persist(path.join(JOBS, job.id, 'art-thumb.png')); }
+  if (!job.test || job.lab) { persist(path.join(JOBS, job.id, 'art.png')); persist(path.join(JOBS, job.id, 'art-thumb.png')); }
 }
 let running = 0;
 async function pump() {
@@ -202,7 +210,7 @@ app.get('/api/jobs/:id', (req, res) => { const j = jobs.get(req.params.id); if (
 app.get('/api/jobs/:id/art', async (req, res) => { const f = path.join(JOBS, req.params.id, req.query.thumb ? 'art-thumb.png' : 'art.png'); if (await ensureLocal(f)) res.sendFile(f); else res.status(404).end(); });
 
 // ----- operator (studio) — unauthenticated on purpose: it only reads art and reports progress; the laptop is yours -----
-app.get('/api/queue', (req, res) => { res.json({ settings: getSettings(), jobs: sortedJobs().filter(j => !['done', 'skipped', 'archived', 'test'].includes(j.status)).map(publicJob), done: sortedJobs().filter(j => j.status === 'done').slice(-10).map(publicJob) }); });
+app.get('/api/queue', (req, res) => { res.json({ settings: getSettings(), jobs: sortedJobs().filter(j => !j.test && !['done', 'skipped', 'archived'].includes(j.status)).map(publicJob), done: sortedJobs().filter(j => j.status === 'done').slice(-10).map(publicJob) }); });
 app.post('/api/queue/claim', (req, res) => { // next ready -> drawing
   const j = sortedJobs().find(j => j.status === 'ready'); if (!j) return res.json({ job: null });
   j.status = 'drawing'; j.drawStartedAt = Date.now(); saveJob(j); res.json({ job: publicJob(j) });
@@ -213,10 +221,10 @@ app.post('/api/jobs/:id/status', (req, res) => { const j = jobs.get(req.params.i
 
 // ----- admin -----
 app.post('/api/admin/login', (req, res) => { if ((req.body.password || '') === ADMIN_PASSWORD) res.json({ ok: true, token: ADMIN_PASSWORD }); else res.status(401).json({ error: 'wrong password' }); });
-app.get('/api/admin/state', adminAuth, (req, res) => res.json({ settings: getSettings(), themes: listThemes(), variants: VARIANT_LABELS, variantOrder: VARIANTS, jobs: sortedJobs().slice(-200).map(j => Object.assign(publicJob(j), { guestName: j.guestName, priority: j.priority })), hasKey: !!OPENAI_KEY, durable: !!bucket, readOnly: !!bucket && !IS_DEPLOYMENT }));
-app.post('/api/admin/settings', adminAuth, (req, res) => { const body = req.body || {}; const allowed = ['model', 'quality', 'size', 'inputFidelity', 'concurrency', 'eventName', 'cameraZoom']; const s = getSettings(); for (const k of allowed) if (k in body) s[k] = body[k]; saveSettings(s); res.json(Object.assign({ ok: true, durable: !!bucket && IS_DEPLOYMENT }, s)); });
+app.get('/api/admin/state', adminAuth, (req, res) => res.json({ settings: getSettings(), themes: listThemes(), variants: VARIANT_LABELS, variantOrder: VARIANTS, jobs: sortedJobs().filter(j => !j.test).slice(-200).map(j => Object.assign(publicJob(j), { guestName: j.guestName, priority: j.priority })), hasKey: !!OPENAI_KEY, durable: !!bucket, readOnly: !!bucket && !IS_DEPLOYMENT }));
+app.post('/api/admin/settings', adminAuth, (req, res) => { const body = req.body || {}; const allowed = ['model', 'quality', 'size', 'inputFidelity', 'moderation', 'concurrency', 'eventName', 'cameraZoom']; const s = getSettings(); for (const k of allowed) if (k in body) s[k] = body[k]; saveSettings(s); res.json(Object.assign({ ok: true, durable: !!bucket && IS_DEPLOYMENT }, s)); });
 app.post('/api/admin/themes', adminAuth, (req, res) => { const name = String(req.body.name || '').trim(); if (!name) return res.status(400).json({ error: 'name required' }); let slug = slugify(name); if (readTheme(slug)) slug += '-' + Date.now().toString(36); writeTheme(slug, { name, enabled: true, order: listThemes().length + 1, prompts: {} }); res.json(readTheme(slug)); });
-app.put('/api/admin/themes/:slug', adminAuth, (req, res) => { const t = readTheme(slugify(req.params.slug)); if (!t) return res.status(404).end(); writeTheme(t.slug, Object.assign(t, req.body, { prompts: Object.assign(t.prompts, req.body.prompts || {}) })); res.json(readTheme(t.slug)); });
+app.put('/api/admin/themes/:slug', adminAuth, (req, res) => { const t = readTheme(slugify(req.params.slug)); if (!t) return res.status(404).end(); writeTheme(t.slug, Object.assign(t, req.body, { prompts: Object.assign(t.prompts, req.body.prompts || {}), variantModels: Object.assign(t.variantModels, req.body.variantModels || {}) })); res.json(readTheme(t.slug)); });
 app.delete('/api/admin/themes/:slug', adminAuth, (req, res) => { const d = path.join(THEMES, slugify(req.params.slug)); if (fs.existsSync(d)) { fs.rmSync(d, { recursive: true }); unpersist(d); } res.json({ ok: true }); });
 app.post('/api/admin/themes/:slug/thumb', adminAuth, upload.single('thumb'), async (req, res) => { const t = readTheme(slugify(req.params.slug)); if (!t || !req.file) return res.status(400).end(); await sharp(req.file.buffer).rotate().resize(700, 700, { fit: 'inside', withoutEnlargement: true }).png().toFile(path.join(THEMES, t.slug, 'thumb.png')); persist(path.join(THEMES, t.slug, 'thumb.png')); res.json({ ok: true }); });
 let modelCache = null; // { models, at } — the key's image models, refetched after an hour
@@ -228,18 +236,40 @@ app.get('/api/admin/models', adminAuth, async (req, res) => {
     }
     res.json({ models: modelCache.models }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.post('/api/admin/test', adminAuth, upload.single('photo'), async (req, res) => { // run a prompt against a photo without queueing for the arm
+// ----- Prompt Lab: one reference photo, one prompt, several models at once; a result can be applied to a theme/combination -----
+app.post('/api/admin/lab', adminAuth, upload.single('photo'), async (req, res) => {
   try {
-    const id = 'test-' + crypto.randomBytes(4).toString('hex');
-    const job = { id, number: 0, status: 'processing', theme: slugify(req.body.theme), variant: req.body.variant, createdAt: Date.now(), attempts: 1, test: true };
-    fs.mkdirSync(path.join(JOBS, id), { recursive: true });
-    await sharp(req.file.buffer).rotate().resize(1536, 1536, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 92 }).toFile(path.join(JOBS, id, 'photo.jpg'));
-    const override = {}; for (const k of ['model', 'quality', 'size', 'inputFidelity']) if (req.body[k]) override[k] = String(req.body[k]);
-    jobs.set(id, job); const t0 = Date.now(); await generateArt(job, override); job.status = 'test'; job.override = override; saveJob(job);
-    const th = readTheme(job.theme) || {}; const thOv = {}; if (th.model) thOv.model = th.model; if (th.quality) thOv.quality = th.quality;
-    res.json({ id, art: `/api/jobs/${id}/art`, used: Object.assign({ model: getSettings().model, quality: getSettings().quality, size: getSettings().size, inputFidelity: getSettings().inputFidelity }, thOv, override), seconds: Math.round((Date.now() - t0) / 1000) });
+    const theme = readTheme(slugify(req.body.theme || '')); if (!theme) return res.status(400).json({ error: 'pick a theme' });
+    const variant = String(req.body.variant || ''); if (!VARIANTS.includes(variant)) return res.status(400).json({ error: 'pick a combination' });
+    const prompt = String(req.body.prompt || '').trim(); if (!prompt) return res.status(400).json({ error: 'write a prompt first' });
+    let models = []; try { models = JSON.parse(req.body.models || '[]'); } catch (_) { } models = models.filter(m => typeof m === 'string' && m).slice(0, 12); if (!models.length) return res.status(400).json({ error: 'tick at least one model' });
+    // reference photo: a fresh upload, or reuse the photo of an earlier lab job
+    let photo; if (req.file) photo = await sharp(req.file.buffer).rotate().resize(1536, 1536, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 92 }).toBuffer();
+    else if (req.body.refJob && jobs.has(req.body.refJob)) { const f = path.join(JOBS, req.body.refJob, 'photo.jpg'); if (await ensureLocal(f)) photo = fs.readFileSync(f); }
+    if (!photo) return res.status(400).json({ error: 'add a reference photo' });
+    const batch = 'lab-' + Date.now().toString(36);
+    const runs = models.map(async model => {
+      const id = 'lab-' + crypto.randomBytes(4).toString('hex');
+      const job = { id, number: 0, status: 'processing', theme: theme.slug, themeName: theme.name, variant, createdAt: Date.now(), attempts: 1, test: true, lab: true, batch, labPrompt: prompt, labModel: model };
+      fs.mkdirSync(path.join(JOBS, id), { recursive: true }); fs.writeFileSync(path.join(JOBS, id, 'photo.jpg'), photo); if (true) persist(path.join(JOBS, id, 'photo.jpg'));
+      jobs.set(id, job); const t0 = Date.now();
+      const override = { model, prompt }; for (const k of ['quality', 'moderation', 'inputFidelity']) if (req.body[k]) override[k] = String(req.body[k]);
+      try { await generateArt(job, override); job.status = 'test'; job.readyAt = Date.now(); } catch (e) { job.status = 'failed'; job.error = String(e.message || e); }
+      job.seconds = Math.round((Date.now() - t0) / 1000); saveJob(job); return labJob(job);
+    });
+    res.json({ batch, results: await Promise.all(runs) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+function labJob(j) { return { id: j.id, batch: j.batch, theme: j.theme, themeName: j.themeName, variant: j.variant, createdAt: j.createdAt, status: j.status, error: j.error, seconds: j.seconds, prompt: j.labPrompt, model: j.labModel, used: j.used, droppedParam: j.droppedParam, art: j.status === 'test' ? `/api/jobs/${j.id}/art` : null, photo: `/api/jobs/${j.id}/photo`, applied: j.applied || null }; }
+app.get('/api/admin/lab', adminAuth, (req, res) => res.json({ results: [...jobs.values()].filter(j => j.lab).sort((a, b) => b.createdAt - a.createdAt).slice(0, 80).map(labJob) }));
+app.post('/api/admin/lab/:id/apply', adminAuth, (req, res) => { // make this result the master prompt + model for a theme/combination
+  const j = jobs.get(req.params.id); if (!j || !j.lab) return res.status(404).end();
+  const theme = readTheme(slugify(req.body.theme || j.theme)); const variant = String(req.body.variant || j.variant); if (!theme || !VARIANTS.includes(variant)) return res.status(400).json({ error: 'bad target' });
+  theme.prompts[variant] = j.labPrompt; theme.variantModels[variant] = { model: (j.used && j.used.model) || j.labModel, quality: (j.used && j.used.quality) || '' };
+  writeTheme(theme.slug, theme); j.applied = { theme: theme.slug, variant, at: Date.now() }; saveJob(j);
+  res.json({ ok: true, theme: readTheme(theme.slug) });
+});
+app.delete('/api/admin/lab/:id', adminAuth, (req, res) => { const j = jobs.get(req.params.id); if (j && j.lab) { jobs.delete(j.id); fs.rmSync(path.join(JOBS, j.id), { recursive: true, force: true }); unpersist(path.join(JOBS, j.id)); } res.json({ ok: true }); });
 app.post('/api/admin/jobs/:id', adminAuth, (req, res) => { // actions: retry, front, skip, requeue (draw again)
   const j = jobs.get(req.params.id); if (!j) return res.status(404).end();
   const a = req.body.action;
