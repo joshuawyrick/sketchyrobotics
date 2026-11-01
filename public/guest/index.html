@@ -202,8 +202,9 @@
     const portrait = window.innerHeight > window.innerWidth; S.camPortrait = portrait;
     // ask the front camera for the orientation we're in, so the feed fills the screen instead of being letterboxed
     const tries = portrait
-      ? [{ video: { facingMode: 'user', width: { ideal: 960 }, height: { ideal: 1280 }, aspectRatio: { ideal: 3 / 4 } }, audio: false }, { video: { facingMode: 'user' }, audio: false }, { video: true, audio: false }]
-      : [{ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 }, aspectRatio: { ideal: 4 / 3 } }, audio: false }, { video: { facingMode: 'user' }, audio: false }, { video: true, audio: false }];
+      // ask for the biggest frame the camera will give (the still is cut from this frame, and the zoom crops it further, so pixels matter)
+      ? [{ video: { facingMode: 'user', width: { ideal: 3024 }, height: { ideal: 4032 }, aspectRatio: { ideal: 3 / 4 } }, audio: false }, { video: { facingMode: 'user', width: { ideal: 1440 }, height: { ideal: 1920 } }, audio: false }, { video: { facingMode: 'user' }, audio: false }, { video: true, audio: false }]
+      : [{ video: { facingMode: 'user', width: { ideal: 4032 }, height: { ideal: 3024 }, aspectRatio: { ideal: 4 / 3 } }, audio: false }, { video: { facingMode: 'user', width: { ideal: 1920 }, height: { ideal: 1440 } }, audio: false }, { video: { facingMode: 'user' }, audio: false }, { video: true, audio: false }];
     for (const c of tries) { try { S.stream = await navigator.mediaDevices.getUserMedia(c); break; } catch (e) { S.camErr = e; } }
     if (S.stream) { $('video').srcObject = S.stream; $('camTip').textContent = 'Get your face in the oval, then tap the blue button'; }
     else { $('shutter').style.display = 'none'; $('guide').style.display = 'none'; $('camTip').textContent = 'Camera not available — use "Use a photo instead"'; }
@@ -225,7 +226,8 @@
     c.width = cw; c.height = ch; const g2 = c.getContext('2d');
     g2.translate(cw, 0); g2.scale(-1, 1); g2.drawImage(v, sx, sy, cw, ch, 0, 0, cw, ch); // un-mirror so left/right match the guest's choice
     const fl = document.createElement('div'); fl.className = 'flash on'; $('cam').appendChild(fl); setTimeout(() => fl.remove(), 400);
-    c.toBlob(b => { S.blob = b; showShot(URL.createObjectURL(b)); }, 'image/jpeg', 0.92);
+    S.shotSize = cw + '×' + ch + ' from a ' + vw + '×' + vh + ' frame'; console.log('photo', S.shotSize);
+    c.toBlob(b => { S.blob = b; showShot(URL.createObjectURL(b)); }, 'image/jpeg', 0.95);
   }
   $('shutter').onclick = () => {
     if (S.counting) return; S.counting = true; $('shutter').disabled = true; $('camTip').style.display = 'none';
