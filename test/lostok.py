@@ -3,7 +3,7 @@ from playwright.async_api import async_playwright
 B='http://localhost:3456'
 FAKE = """
   window.__lines = [];
-  const mk = () => ({ getInfo: () => ({ usbVendorId: 1155, usbProductId: 22336 }), open: async () => {}, close: async () => {}, addEventListener: () => {},
+  const mk = () => window.__port || (window.__port = ({ getInfo: () => ({ usbVendorId: 1155, usbProductId: 22336 }), open: async () => {}, close: async () => {}, addEventListener: () => {},
     readable: new ReadableStream({ start(c) { window.__push = t => c.enqueue(new TextEncoder().encode(t)); } }),
     writable: new WritableStream({ write(chunk) { const line = new TextDecoder().decode(chunk).trim(); window.__lines.push(line); if (window.__lines.length === 400) return; setTimeout(() => { if (/^M114/.test(line)) window.__push('X:0.00 Y:300.00 Z:1.20 E:0.00\\r\\nok\\r\\n'); else if (/^M2010/.test(line)) window.__push('V2.4.4\\r\\nok\\r\\n'); else window.__push('ok\\r\\n'); }, /^G1 X/.test(line) ? 15 : 2); } }) });
   Object.defineProperty(navigator, 'serial', { configurable: true, value: { requestPort: async () => mk(), getPorts: async () => [], addEventListener: () => {} } });

@@ -1494,6 +1494,7 @@ window.DEXARM_PEN_OFFSET=114;
       if (cp.job) { await qStatus(cp.job.id, ok ? 'done' : 'ready', ok ? '' : 'stopped by operator', ok ? Object.assign(drawReport(), { drawSeconds: S.lastDrawSeconds }) : null).catch(() => {}); $('qStatus').textContent = ok ? `#${cp.job.number} done ✓ (resumed) — fresh paper in, then 1 · Load next sketch.` : `#${cp.job.number} stopped — it is back at the front of the line.`; Q.busy = false; Q.current = null; qRefresh(); }
     };
     $('btnResumeNo').onclick = () => { clearCheckpoint(); box.style.display = 'none'; qRefresh(); };
+    if (Q.resume || Q.on) { log('auto-run was on — resuming the interrupted drawing by itself in 3 s (press Start over to stop that)'); const t = setTimeout(() => { if (box.style.display !== 'none') $('btnResume').click(); }, 3000); $('btnResumeNo').addEventListener('click', () => clearTimeout(t)); }
   }
   $('btnStart').addEventListener('click', () => runDrawing());
   $('btnPause').addEventListener('click', () => { S.paused = !S.paused; $('btnPause').textContent = S.paused ? '▶ Resume' : '⏸ Pause'; log(S.paused ? 'paused (finishing buffered moves)' : 'resumed'); });

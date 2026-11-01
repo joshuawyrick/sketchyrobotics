@@ -2,9 +2,9 @@ import asyncio
 from playwright.async_api import async_playwright
 B='http://localhost:3456'
 FAKE = """
-  const mk = () => ({ getInfo: () => ({ usbVendorId: 1155, usbProductId: 22336 }), open: async () => {}, close: async () => {}, addEventListener: () => {},
+  const mk = () => window.__port || (window.__port = ({ getInfo: () => ({ usbVendorId: 1155, usbProductId: 22336 }), open: async () => {}, close: async () => {}, addEventListener: () => {},
     readable: new ReadableStream({ start(c) { window.__push = t => c.enqueue(new TextEncoder().encode(t)); } }),
-    writable: new WritableStream({ write(chunk) { const line = new TextDecoder().decode(chunk).trim(); window.__sent=(window.__sent||0)+1; setTimeout(() => { if (/^M114/.test(line)) window.__push('X:0.00 Y:300.00 Z:1.20 E:0.00\\r\\nok\\r\\n'); else if (/^M2010/.test(line)) window.__push('V2.4.4\\r\\nok\\r\\n'); else window.__push('ok\\r\\n'); }, 2); } }) });
+    writable: new WritableStream({ write(chunk) { const line = new TextDecoder().decode(chunk).trim(); window.__sent=(window.__sent||0)+1; setTimeout(() => { if (/^M114/.test(line)) window.__push('X:0.00 Y:300.00 Z:1.20 E:0.00\\r\\nok\\r\\n'); else if (/^M2010/.test(line)) window.__push('V2.4.4\\r\\nok\\r\\n'); else window.__push('ok\\r\\n'); }, 2); } }) }))
   Object.defineProperty(navigator, 'serial', { configurable: true, value: { requestPort: async () => { localStorage.setItem('__granted','1'); return mk(); }, getPorts: async () => localStorage.getItem('__granted') ? [mk()] : [], addEventListener: () => {} } });
 """
 async def main():
