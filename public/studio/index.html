@@ -1011,6 +1011,20 @@ window.DEXARM_PEN_OFFSET=114;
     }
     /** fire-and-forget, no ack tracking (for emergency stop) */
     async raw(line) { this.onTx(line); await this.writer.write(new TextEncoder().encode(line + '\r\n')); }
+    /** wait until the arm has been quiet (no serial lines) for quietMs — i.e. every queued command has been acked */
+    settle(quietMs = 600, maxMs = 8000) {
+      return new Promise(resolve => {
+        const t0 = Date.now(); let last = Date.now(); const old = this.onLine;
+        this.onLine = l => { old(l); last = Date.now(); };
+        const tick = () => { if (Date.now() - last >= quietMs || Date.now() - t0 >= maxMs || !this.connected) { this.onLine = old; resolve(); } else setTimeout(tick, 50); };
+        setTimeout(tick, 50);
+      });
+    }
+    /** forget every outstanding ack. Used after an emergency stop (M410's own "ok" would otherwise be credited to the
+     *  next command, and from then on every send would be acked one early — the arm ends up running garbled lines). */
+    flush() { const n = this._waiters.length; for (const w of this._waiters.splice(0)) w.reject(new Error('flushed')); return n; }
+    /** emergency stop: M410 (firmware drops its planned moves), then wait for silence and resync the ack accounting */
+    async stop() { try { await this.raw('M410'); } catch (_) { } await this.settle(800); return this.flush(); }
 
     /** send and wait for a reply that matches `re` (e.g. M114 position) */
     async query(line, re, timeoutMs = 3000) {
@@ -1027,13 +1041,20 @@ window.DEXARM_PEN_OFFSET=114;
     async stream(gcode, ctl) {
       const lines = gcode.split('\n').map(l => l.replace(/;.*$/, '').trim()).filter(Boolean);
       const inflight = Math.max(1, Math.min(8, ctl.inflight || 3));
-      let i = 0, done = 0; const pending = [];
+      let i = 0, done = 0; const pending = []; let penDown = false;
       const total = lines.length;
+      const quiesce = async () => { await Promise.all(pending.slice()); await this.send('M400'); }; // let the queued moves finish
+      const stopped = async () => { await quiesce(); if (penDown && ctl.penUp) await this.send(ctl.penUp); throw new Error('stopped'); };
       while (i < lines.length) {
-        if (ctl.shouldStop && ctl.shouldStop()) throw new Error('stopped');
-        while (ctl.shouldPause && ctl.shouldPause()) { await new Promise(r => setTimeout(r, 100)); if (ctl.shouldStop && ctl.shouldStop()) throw new Error('stopped'); }
-        const idx = i++;
-        const p = this.send(lines[idx]).then(r => { done++; if (ctl.onProgress) ctl.onProgress(done, total, lines[idx], r); pending.splice(pending.indexOf(p), 1); });
+        if (ctl.shouldStop && ctl.shouldStop()) await stopped();
+        if (ctl.shouldPause && ctl.shouldPause()) {
+          await quiesce(); if (penDown && ctl.penUp) await this.send(ctl.penUp); // pen off the paper while paused (no ink blob)
+          while (ctl.shouldPause()) { await new Promise(r => setTimeout(r, 100)); if (ctl.shouldStop && ctl.shouldStop()) { penDown = false; await stopped(); } }
+          if (penDown && ctl.penDown) await this.send(ctl.penDown);
+        }
+        const idx = i++; const line = lines[idx];
+        if (/^G1 Z/.test(line)) penDown = true; else if (/^G0 Z/.test(line)) penDown = false;
+        const p = this.send(line).then(r => { done++; if (ctl.onProgress) ctl.onProgress(done, total, line, r); pending.splice(pending.indexOf(p), 1); });
         pending.push(p);
         if (pending.length >= inflight) await Promise.race(pending);
       }
@@ -1345,10 +1366,13 @@ window.DEXARM_PEN_OFFSET=114;
   $('btnConnect').addEventListener('click', () => connectArm(null));
   $('btnDisconnect').addEventListener('click', () => { localStorage.setItem('dexdraw.autoConnect', '0'); link.disconnect(); });
   if (DexSerial.supported()) { autoReconnect('page reloaded'); navigator.serial.addEventListener('connect', () => setTimeout(() => autoReconnect('USB plugged in'), 500)); }
-  $('btnHome').addEventListener('click', guard(async () => { log('homing…'); await link.send('M1112'); await link.send('M400'); await link.send('M114'); }));
+  $('btnHome').addEventListener('click', guard(async () => { log('homing…'); await link.send('M1112'); await link.send('M400'); await link.send('M114'); if (S.needsHome) { S.needsHome = false; log('homed — drawing is enabled again'); updateButtons(); qRefresh(); } }));
   $('btnPos').addEventListener('click', guard(() => link.send('M114')));
   $('btnMotorsOff').addEventListener('click', guard(() => link.send('M84')));
-  $('btnEstop').addEventListener('click', async () => { S.stopFlag = true; try { await link.raw('M410'); } catch (_) { } log('STOP sent — press Home before moving again', 'err'); });
+  $('btnEstop').addEventListener('click', async () => {
+    S.stopFlag = true; S.needsHome = true; if (typeof Q !== 'undefined' && Q.on) { Q.on = false; syncQ(); }
+    const n = await link.stop(); log(`STOP sent — the arm no longer knows where it is: press ⌂ Home before drawing again${n ? ' (' + n + ' unacked lines discarded)' : ''}`, 'err'); updateButtons();
+  });
   document.querySelectorAll('.jog button[data-j]').forEach(b => b.addEventListener('click', guard(async () => {
     const [x, y, z] = b.dataset.j.split(',').map(Number); if (!x && !y && !z) return;
     const st = num('jogStep'), f = num('jogSpeed');
@@ -1373,14 +1397,14 @@ window.DEXARM_PEN_OFFSET=114;
   async function runDrawing() {
     if (!S.gcode) generate(); if (!S.gcode || !link.connected) { if (S.block) log(S.block, 'err'); return false; }
     S.running = true; S.paused = false; S.stopFlag = false; updateButtons();
-    const t0 = performance.now(); let ok = false;
+    const t0 = performance.now(); let ok = false; const o = gcodeOpts();
     try {
       const done = await link.stream(S.gcode, {
-        inflight: num('inflight'), shouldPause: () => S.paused, shouldStop: () => S.stopFlag,
+        inflight: num('inflight'), shouldPause: () => S.paused, shouldStop: () => S.stopFlag, penUp: `G0 Z${o.penUpZ} F${o.zSpeed}`, penDown: `G1 Z${o.penDownZ} F${o.zSpeed}`,
         onProgress: (i, n) => { $('prog').firstElementChild.style.width = (100 * i / n) + '%'; $('progTxt').textContent = `${i} / ${n} lines · ${((performance.now() - t0) / 1000).toFixed(0)} s`; }
       });
       log(`done: ${done} lines in ${((performance.now() - t0) / 1000).toFixed(1)} s`); ok = true;
-    } catch (e) { log('drawing ' + e.message, 'err'); if (/stopped/.test(e.message)) { try { await link.raw('M410'); } catch (_) { } } }
+    } catch (e) { if (/stopped/.test(e.message)) log('drawing stopped — pen lifted, position still valid (no Home needed)', 'err'); else log('drawing ' + e.message, 'err'); }
     S.running = false; S.paused = false; updateButtons();
     return ok;
   }
@@ -1390,9 +1414,10 @@ window.DEXARM_PEN_OFFSET=114;
   function updateButtons() {
     const have = !!S.plan && S.plan.strokes.length > 0 && !S.planDirty, ok = have && !S.block;
     $('btnGen').disabled = !ok; $('btnDl').disabled = !ok; $('btnFrame').disabled = !ok || !link.connected || S.running;
-    $('btnStart').disabled = !ok || !link.connected || S.running;
+    $('btnStart').disabled = !ok || !link.connected || S.running || S.needsHome;
+    $('btnStart').title = S.needsHome ? 'STOP was used — press ⌂ Home first' : '';
     $('btnPause').disabled = !S.running; $('btnStop').disabled = !S.running;
-    $('blockMsg').textContent = S.block ? '⚠ ' + S.block : '';
+    $('blockMsg').textContent = S.needsHome && link.connected ? '⚠ STOP was used — press ⌂ Home before drawing' : S.block ? '⚠ ' + S.block : '';
     if (!S.running) $('btnPause').textContent = '⏸ Pause';
   }
 
@@ -1528,7 +1553,8 @@ window.DEXARM_PEN_OFFSET=114;
     $('qSum').textContent = `${ready.length} ready · ${proc.length} generating · ${d.done.length} drawn`;
     $('qList').innerHTML = d.jobs.filter(j => ['ready', 'drawing'].includes(j.status)).slice(0, 12).map(j => `<div class="qItem ${j.status}" data-id="${j.id}"><img src="/api/jobs/${j.id}/art?thumb=1"><div><b>#${j.number}</b> ${j.themeName}<br><span class="note">${j.status === 'drawing' ? '✎ drawing now' : 'ready'}</span></div><button data-skip="${j.id}" title="Skip this one">✕</button></div>`).join('') || '<div class="note">Nothing ready yet.</div>';
     $('qList').querySelectorAll('button[data-skip]').forEach(b => b.onclick = async () => { await qFetch('/api/jobs/' + b.dataset.skip + '/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'skipped' }) }); qRefresh(); });
-    $('btnQNext').disabled = !ready.length || S.running || Q.busy || !link.connected;
+    $('btnQNext').disabled = !ready.length || S.running || Q.busy || !link.connected || S.needsHome;
+    if (S.needsHome && Q.on) { Q.on = false; syncQ(); $('qStatus').textContent = 'STOP was used — press ⌂ Home, then start again'; }
     if (Q.on && !Q.busy && !S.running && !Q.waitingContinue) { if (ready.length) { if (link.connected) qDrawNext(); else $('qStatus').textContent = 'auto-run: waiting for the arm to reconnect…'; } else if (!/done|problem|stopped/.test($('qStatus').textContent)) $('qStatus').textContent = 'auto-run on — waiting for the next guest…'; }
   }
   async function qDrawNext() {
@@ -1545,9 +1571,9 @@ window.DEXARM_PEN_OFFSET=114;
       generate(); if (!S.gcode) throw new Error(S.block || 'no g-code');
       $('qStatus').textContent = `#${job.number}: drawing…`;
       const ok = await runDrawing();
-      await qStatus(job.id, ok ? 'done' : 'failed', ok ? '' : 'stopped');
+      await qStatus(job.id, ok ? 'done' : 'ready', ok ? '' : 'stopped by operator'); // a stopped drawing goes back to the front of the line
       Q.current = null; clearCanvas();
-      $('qStatus').textContent = ok ? `#${job.number} done ✓` : `#${job.number} stopped`;
+      $('qStatus').textContent = ok ? `#${job.number} done ✓` : `#${job.number} stopped — it stays first in line; press Sketch next to redraw it or ✕ to skip it`;
       if (ok && Q.on && $('qPause').checked) { Q.waitingContinue = true; $('qStatus').textContent = `#${job.number} done ✓ — change the paper, then press Continue`; $('btnQContinue').style.display = ''; }
       else if (ok && Q.on) $('qStatus').textContent = `#${job.number} done ✓ — next one starts automatically`;
       if (!ok) { Q.on = false; syncQ(); }
@@ -1569,8 +1595,8 @@ window.DEXARM_PEN_OFFSET=114;
   $('qSize').addEventListener('change', () => { $('qSizeCustomRow').style.display = $('qSize').value === 'custom' ? '' : 'none'; });
   $('qSizeCustomRow').style.display = $('qSize').value === 'custom' ? '' : 'none';
   function syncQ() { try { localStorage.setItem('dexdraw.autoRun', Q.on ? '1' : '0'); } catch (_) { } $('btnQAuto').textContent = Q.on ? '■ Stop auto-run' : '▶ Auto-run queue'; $('btnQAuto').classList.toggle('danger', Q.on); $('btnQAuto').classList.toggle('primary', !Q.on); if (!Q.on) { Q.waitingContinue = false; $('btnQContinue').style.display = 'none'; } }
-  $('btnQAuto').addEventListener('click', () => { if (!link.connected) { log('connect the arm first', 'err'); return; } Q.on = !Q.on; syncQ(); if (Q.on) { log('auto-run on: setup must be done (Home, pen height, paper center)'); qRefresh(); } });
-  $('btnQNext').addEventListener('click', () => { if (!link.connected) { log('connect the arm first', 'err'); return; } qDrawNext(); });
+  $('btnQAuto').addEventListener('click', () => { if (!link.connected) { log('connect the arm first', 'err'); return; } if (S.needsHome) { log('press ⌂ Home first (STOP was used)', 'err'); return; } Q.on = !Q.on; syncQ(); if (Q.on) { log('auto-run on: setup must be done (Home, pen height, paper center)'); qRefresh(); } });
+  $('btnQNext').addEventListener('click', () => { if (!link.connected) { log('connect the arm first', 'err'); return; } if (S.needsHome) { log('press ⌂ Home first (STOP was used)', 'err'); return; } qDrawNext(); });
   $('btnQContinue').addEventListener('click', () => { Q.waitingContinue = false; $('btnQContinue').style.display = 'none'; qRefresh(); });
   $('btnQSkipCur').addEventListener('click', () => { Q.cancelPreview = true; if (S.running) S.stopFlag = true; });
   // auto-run survives a page reload: it resumes as soon as the arm has reconnected
