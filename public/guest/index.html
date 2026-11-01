@@ -51,17 +51,19 @@
   .cam video,.cam img,.cam canvas{max-width:100%;max-height:100%;object-fit:contain}
   .cam img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
   .cam video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1) scale(var(--zoom,1.6));transform-origin:center}
-  .count{position:absolute;top:18px;left:50%;transform:translateX(-50%);min-width:92px;padding:6px 20px;border-radius:999px;background:rgba(0,0,0,.55);color:#fff;font:800 56px/1.1 system-ui;text-align:center;display:none;letter-spacing:1px}
+  .count{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);min-width:260px;padding:10px 40px;border-radius:40px;background:rgba(0,0,0,.6);color:#fff;font:900 200px/1 system-ui;text-align:center;display:none;letter-spacing:1px;text-shadow:0 4px 18px rgba(0,0,0,.5)}
   .count.on{display:block}
-  .count.go{background:rgba(0,109,246,.85);font-size:34px;padding:14px 26px}
+  .count.go{background:rgba(0,109,246,.9);font-size:96px;padding:28px 48px}
   .tip{position:absolute;top:18px;left:50%;transform:translateX(-50%);padding:8px 16px;border-radius:999px;background:rgba(0,0,0,.5);color:#fff;font:600 16px system-ui;white-space:nowrap}
   .flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
   .flash.on{animation:fl .35s ease-out}@keyframes fl{0%{opacity:.9}100%{opacity:0}}
   .guide{position:absolute;left:50%;top:48%;height:58%;max-height:520px;aspect-ratio:3/4;transform:translate(-50%,-50%);pointer-events:none;border:3px dashed rgba(255,255,255,.55);border-radius:50%/48%}
-  .snap{position:absolute;bottom:26px;left:50%;transform:translateX(-50%);width:140px;height:140px;border-radius:50%;background:#fff;border:8px solid rgba(255,255,255,.45);box-shadow:0 6px 24px rgba(0,0,0,.45);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}
-  .snap span{font:800 16px/1.1 system-ui;color:var(--blue);letter-spacing:.5px}
-  .snap:active{transform:translateX(-50%) scale(.95)}
-  .snap:disabled{opacity:.5}
+  .snap{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:min(78%,520px);padding:26px 30px;border-radius:32px;background:#0a6cff;border:6px solid #fff;box-shadow:0 10px 40px rgba(0,0,0,.55),0 0 0 10px rgba(10,108,255,.35);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;animation:pulse 1.6s ease-in-out infinite}
+  .snap b{font:900 40px/1.1 system-ui;color:#fff;letter-spacing:.5px}
+  .snap small{font:600 20px/1.2 system-ui;color:#fff;opacity:.95}
+  .snap:active{transform:translate(-50%,-50%) scale(.96);animation:none}
+  .snap:disabled{display:none}
+  @keyframes pulse{0%,100%{box-shadow:0 10px 40px rgba(0,0,0,.55),0 0 0 10px rgba(10,108,255,.35)}50%{box-shadow:0 10px 40px rgba(0,0,0,.55),0 0 0 22px rgba(10,108,255,.12)}}
   .status{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:12px}
   .big{font-size:96px;font-weight:800;color:var(--blue);line-height:1}
   .art{max-height:52vh;max-width:100%;border:1px solid var(--line);border-radius:12px;background:#fff}
@@ -101,8 +103,8 @@
       <video id="video" autoplay playsinline muted></video>
       <div class="guide" id="guide"></div>
       <div class="count" id="count"></div>
-      <div class="tip" id="camTip">Get your face in the oval, then tap the button</div>
-      <button class="snap" id="shutter"><span>TAKE PHOTO</span></button>
+      <div class="tip" id="camTip">Get your face in the oval, then tap the blue button</div>
+      <button class="snap" id="shutter"><b>TAP HERE TO START</b><small>3 · 2 · 1 · then smile!</small></button>
       <img id="shot" style="display:none">
     </div>
     <div class="bar" id="camBar"><button class="btn" id="backCam">Back</button><button class="btn" id="fileBtn">Use a photo instead</button><input type="file" id="fileIn" accept="image/*" capture="user" style="display:none"></div>
@@ -172,7 +174,7 @@
       ? [{ video: { facingMode: 'user', width: { ideal: 960 }, height: { ideal: 1280 }, aspectRatio: { ideal: 3 / 4 } }, audio: false }, { video: { facingMode: 'user' }, audio: false }, { video: true, audio: false }]
       : [{ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 }, aspectRatio: { ideal: 4 / 3 } }, audio: false }, { video: { facingMode: 'user' }, audio: false }, { video: true, audio: false }];
     for (const c of tries) { try { S.stream = await navigator.mediaDevices.getUserMedia(c); break; } catch (e) { S.camErr = e; } }
-    if (S.stream) { $('video').srcObject = S.stream; $('camTip').textContent = 'Get your face in the oval, then tap the button'; }
+    if (S.stream) { $('video').srcObject = S.stream; $('camTip').textContent = 'Get your face in the oval, then tap the blue button'; }
     else { $('shutter').style.display = 'none'; $('guide').style.display = 'none'; $('camTip').textContent = 'Camera not available — use "Use a photo instead"'; }
   }
   // The camera stays on while a guest is posing/reviewing, and is released on the status screen so the
