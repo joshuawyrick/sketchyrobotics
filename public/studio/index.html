@@ -214,6 +214,8 @@
     <section>
       <h2>Event queue <span class="note" id="qSum" style="margin-left:auto"></span></h2>
       <div class="body">
+        <div id="opLogin" style="display:none;border:2px solid var(--acc);border-radius:10px;padding:10px;margin-bottom:8px;background:#eaf2ff"><b>Sign in to run the event queue</b><div class="note" style="margin:4px 0 8px">Use the operator name and password the admin gave you.</div><input id="opName" placeholder="name" style="width:100%;margin-bottom:6px"><input id="opPw" type="password" placeholder="password" style="width:100%;margin-bottom:8px"><div class="btns"><button id="opGo" class="primary">Sign in</button></div><div class="note" id="opErr" style="color:#b51f33"></div></div>
+        <div class="note" id="opWho" style="display:none;margin-bottom:6px"></div>
         <div id="botStrip" class="botStrip" style="display:none"></div>
         <div class="note" id="resumeBox" style="display:none;border:2px solid var(--acc);border-radius:10px;padding:8px 10px;margin-bottom:8px;background:#eaf2ff;color:var(--ink)"></div>
         <div class="qCur" id="qCur" style="display:none"><img id="qCurImg" alt=""><div><b id="qCurName"></b><div class="note" id="qCurNote"></div></div></div>
@@ -1714,7 +1716,7 @@ window.DEXARM_PEN_OFFSET=114;
   let lastBeat = 0;
   function heartbeat() { if (Date.now() - lastBeat < 2500) return; lastBeat = Date.now();
     const st = S.running ? 'drawing' : Q.busy ? 'loading' : Q.loaded ? 'ready to draw' : Q.on ? 'auto-run' : link.connected ? 'idle' : 'not connected';
-    fetch('/api/bots/heartbeat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bot: BOT, connected: link.connected, status: st, jobId: Q.current ? Q.current.id : (Q.loaded ? Q.loaded.id : null), number: Q.current ? Q.current.number : (Q.loaded ? Q.loaded.number : null), progress: S.running ? S.progressPct || 0 : 0 }) }).catch(() => {}); }
+    fetch('/api/bots/heartbeat', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-token': opToken() }, body: JSON.stringify({ bot: BOT, connected: link.connected, status: st, jobId: Q.current ? Q.current.id : (Q.loaded ? Q.loaded.id : null), number: Q.current ? Q.current.number : (Q.loaded ? Q.loaded.number : null), progress: S.running ? S.progressPct || 0 : 0 }) }).catch(() => {}); }
   function syncBotUI(n, list) {
     const badge = $('botBadge'), sel = $('botSel'), strip = $('botStrip');
     if (n <= 1) { badge.style.display = 'none'; sel.style.display = 'none'; strip.style.display = 'none'; document.documentElement.style.setProperty('--bot', BOT_COLORS[0]); return; }
@@ -1723,7 +1725,15 @@ window.DEXARM_PEN_OFFSET=114;
     strip.style.display = ''; strip.innerHTML = list.map(b => `<div class="botCard ${b.bot === BOT ? 'me' : ''} ${b.live && b.connected ? 'on' : ''}" style="--c:${BOT_COLORS[(b.bot - 1) % BOT_COLORS.length]}"><b>Bot ${b.bot}</b><span>${b.live ? (b.connected ? (b.status === 'drawing' && b.number ? `drawing #${b.number} · ${Math.round(b.progress)}%` : b.status) : 'tab open, arm not connected') : 'no tab open'}</span><span class="note">${b.waiting} waiting</span></div>`).join('');
   }
   $('botSel').addEventListener('change', () => { const u = new URL(location.href); u.searchParams.set('bot', $('botSel').value); location.href = u.toString(); });
-  async function qFetch(url, opts) { const r = await fetch(url, opts); if (!r.ok) throw new Error(url + ' ' + r.status); return r.json(); }
+  // operator sign-in: the server's queue endpoints need a token; it is kept on this browser (not per robot tab) until sign-out
+  const OPQ = new URLSearchParams(location.search); if (OPQ.get('token')) { try { localStorage.setItem('sr.op', OPQ.get('token')); } catch (_) {} }
+  const opToken = () => { try { return localStorage.getItem('sr.op') || ''; } catch (_) { return ''; } };
+  async function qFetch(url, opts) { opts = opts || {}; opts.headers = Object.assign({ 'x-admin-token': opToken() }, opts.headers || {}); const r = await fetch(url, opts); if (r.status === 401) { showOpLogin(true); throw new Error('sign in'); } if (!r.ok) throw new Error(url + ' ' + r.status); return r.json(); }
+  function showOpLogin(on) { $('opLogin').style.display = on ? '' : 'none'; if (on) { $('opWho').style.display = 'none'; $('qStatus').textContent = 'sign in above to use the event queue'; } }
+  $('opGo').addEventListener('click', async () => { $('opErr').textContent = ''; try { const r = await fetch('/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: $('opName').value.trim(), password: $('opPw').value }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'wrong name or password'); localStorage.setItem('sr.op', d.token); $('opPw').value = ''; showOpLogin(false); whoAmI(); qRefresh(); } catch (e) { $('opErr').textContent = e.message; } });
+  $('opPw').addEventListener('keydown', e => { if (e.key === 'Enter') $('opGo').click(); });
+  async function whoAmI() { try { const me = await qFetch('/api/me'); $('opWho').style.display = ''; $('opWho').innerHTML = `signed in as <b>${me.name}</b> (${me.role}) · <a href="#" id="opOut">sign out</a>`; $('opOut').onclick = async e => { e.preventDefault(); await fetch('/api/logout', { method: 'POST', headers: { 'x-admin-token': opToken() } }).catch(() => {}); localStorage.removeItem('sr.op'); showOpLogin(true); }; } catch (_) {} }
+  whoAmI();
   async function qStatus(id, status, error, extra) { // report a job's outcome; retries so a network hiccup can't leave it stuck in "drawing"
     for (let i = 0; i < 5; i++) { try { return await qFetch('/api/jobs/' + id + '/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ status, error: error || '' }, extra || {})) }); } catch (e) { if (i === 4) throw e; await new Promise(r => setTimeout(r, 1500)); } }
   }
@@ -1731,7 +1741,7 @@ window.DEXARM_PEN_OFFSET=114;
   function clearCanvas() { for (const o of S.objects.slice()) deleteObj(o); S.gcode = null; refresh(); }
   async function qRefresh() {
     heartbeat();
-    let d; try { d = await qFetch('/api/queue'); Q.available = true; } catch (_) { Q.available = false; $('qList').innerHTML = '<div class="note">Queue server not reachable (open this page from the Sketchy server to use the event queue).</div>'; return; }
+    let d; try { d = await qFetch('/api/queue'); Q.available = true; } catch (_) { Q.available = false; $('qList').innerHTML = $('opLogin').style.display !== 'none' ? '' : '<div class="note">Queue server not reachable (open this page from the Sketchy server to use the event queue).</div>'; return; }
     if (!Q.checked) { Q.checked = true; const cp = loadCheckpoint(); for (const j of d.jobs.filter(j => j.status === 'drawing' && !(cp && cp.job && cp.job.id === j.id))) { log(`queue: #${j.number} was interrupted (page reloaded) — put back in line`); await qStatus(j.id, 'ready').catch(() => {}); j.status = 'ready'; } }
     const nBots = Math.max(1, +(d.settings && d.settings.bots) || 1); syncBotUI(nBots, d.bots || []); Q.unmanned = !!(d.settings && d.settings.staffing === 'unmanned'); $('qUnmannedRow').style.display = Q.unmanned ? '' : 'none'; $('qPause').disabled = Q.unmanned; if (Q.unmanned && Q.waitingContinue) { Q.waitingContinue = false; $('btnQContinue').style.display = 'none'; }
     const mine = j => nBots <= 1 || j.bot === BOT || !j.bot, readyAll = d.jobs.filter(j => j.status === 'ready');

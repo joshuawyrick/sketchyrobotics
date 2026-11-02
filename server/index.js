@@ -44,7 +44,7 @@ async function restoreFromBucket() {
   if (IS_DEPLOYMENT) { for (const d of [THEMES, JOBS]) fs.rmSync(d, { recursive: true, force: true }); fs.rmSync(SETTINGS_FILE, { force: true }); fs.rmSync(path.join(DATA, 'lab-refs.json'), { force: true }); fs.rmSync(path.join(DATA, 'builder.json'), { force: true }); fs.rmSync(path.join(DATA, 'refs'), { recursive: true, force: true }); fs.mkdirSync(path.join(DATA, 'refs'), { recursive: true }); for (const d of [THEMES, JOBS]) fs.mkdirSync(d, { recursive: true }); }
   let n = 0;
   for (const o of r.value) {
-    if (!o.name || o.name.endsWith('/') || !/^(themes|jobs|refs)\/|^(settings|lab-refs|builder)\.json$/.test(o.name)) continue; // skip folders and anything that isn't ours
+    if (!o.name || o.name.endsWith('/') || !/^(themes|jobs|refs)\/|^(settings|lab-refs|builder|users|sessions)\.json$/.test(o.name)) continue; // skip folders and anything that isn't ours
     const dest = path.join(DATA, o.name);
     if (IS_DEPLOYMENT && /\/(photo\.jpg|art\.png|art-thumb\.png)$/.test(o.name)) continue; // big files: fetched when first requested
     if (await download(o.name, dest)) n++;
@@ -193,7 +193,27 @@ app.post('/api/stripe/webhook', express.raw({ type: '*/*', limit: '1mb' }), (req
 app.use(express.json({ limit: '2mb' }));
 app.disable('x-powered-by');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
-const adminAuth = (req, res, next) => { const t = req.get('x-admin-token') || req.query.token; if (t === ADMIN_PASSWORD) return next(); res.status(401).json({ error: 'bad password' }); };
+// ---------- users: the admin (ADMIN_PASSWORD secret) plus operator accounts the admin creates; sessions are random tokens ----------
+const USERS_FILE = path.join(DATA, 'users.json'), SESS_FILE = path.join(DATA, 'sessions.json');
+const loadUsers = () => { try { return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')); } catch (_) { return []; } };
+const saveUsers = u => { fs.writeFileSync(USERS_FILE, JSON.stringify(u, null, 2)); persist(USERS_FILE); };
+const sessions = new Map(); const loadSess = () => { try { for (const [k, v] of Object.entries(JSON.parse(fs.readFileSync(SESS_FILE, 'utf8')))) if (!sessions.has(k)) sessions.set(k, v); } catch (_) {} }; loadSess();
+const saveSessions = () => { fs.writeFileSync(SESS_FILE, JSON.stringify(Object.fromEntries(sessions))); persist(SESS_FILE); };
+const hashPw = (pw, salt) => { salt = salt || crypto.randomBytes(8).toString('hex'); return salt + ':' + crypto.scryptSync(String(pw), salt, 32).toString('hex'); };
+const checkPw = (pw, h) => { try { const salt = h.split(':')[0]; return crypto.timingSafeEqual(Buffer.from(hashPw(pw, salt)), Buffer.from(h)); } catch (_) { return false; } };
+const SESSION_DAYS = 30;
+function whoIs(req) { // -> { name, role: 'admin'|'operator' } or null
+  const t = req.get('x-admin-token') || req.query.token || ''; if (!t) return null; if (!sessions.size) loadSess(); // (restored from the bucket after startup on a fresh deploy)
+  if (t === ADMIN_PASSWORD) return { name: 'admin', role: 'admin' };
+  const se = sessions.get(t); if (!se) return null; if (Date.now() - se.at > SESSION_DAYS * 86400000) { sessions.delete(t); saveSessions(); return null; }
+  if (se.role === 'admin') return { name: se.name, role: 'admin' };
+  const u = loadUsers().find(u => u.id === se.userId); if (!u || u.enabled === false) return null; return { name: u.name, role: u.role === 'admin' ? 'admin' : 'operator' };
+}
+const adminAuth = (req, res, next) => { const w = whoIs(req); if (w && w.role === 'admin') { req.user = w; return next(); } res.status(w ? 403 : 401).json({ error: w ? 'admin only' : 'please sign in' }); };
+const opAuth = (req, res, next) => { const w = whoIs(req); if (w) { req.user = w; return next(); } res.status(401).json({ error: 'please sign in' }); };
+const STUDIO_AUTH = process.env.OPEN_STUDIO !== '1'; // tests run the Studio endpoints without a login
+const studioAuth = (req, res, next) => STUDIO_AUTH ? opAuth(req, res, next) : next();
+function newSession(se) { const t = crypto.randomBytes(24).toString('hex'); sessions.set(t, Object.assign({ at: Date.now() }, se)); saveSessions(); return t; }
 
 // static pages
 app.use('/studio', express.static(path.join(ROOT, 'public', 'studio')));
@@ -277,27 +297,46 @@ app.get('/api/jobs/:id/art', async (req, res) => { const f = path.join(JOBS, req
   if (req.query.download) { const j = jobs.get(req.params.id) || {}; res.setHeader('content-disposition', `attachment; filename="sketch-${String(j.number || 0).padStart(3, '0')}-${slugify(j.themeName || 'theme')}.png"`); } res.sendFile(f); });
 
 // ----- operator (studio) — unauthenticated on purpose: it only reads art and reports progress; the laptop is yours -----
-app.get('/api/queue', (req, res) => { res.json({ settings: getSettings(), bots: botList(), jobs: sortedJobs().filter(j => !j.test && !['done', 'skipped', 'archived', 'unpaid', 'expired'].includes(j.status)).map(publicJob), done: sortedJobs().filter(j => j.status === 'done').slice(-10).map(publicJob) }); });
+app.get('/api/queue', studioAuth, (req, res) => { res.json({ settings: getSettings(), bots: botList(), jobs: sortedJobs().filter(j => !j.test && !['done', 'skipped', 'archived', 'unpaid', 'expired'].includes(j.status)).map(publicJob), done: sortedJobs().filter(j => j.status === 'done').slice(-10).map(publicJob) }); });
 // Unmanned events: after each drawing the robot waits until a guest taps "paper is in" on the iPad (nobody is there to swap the sheet)
 const paperWait = new Map(); // bot -> { since, number }
 const unmanned = () => getSettings().staffing === 'unmanned';
 app.post('/api/bots/:n/paper', (req, res) => { paperWait.delete(Math.max(1, +req.params.n || 1)); res.json({ ok: true }); });
-app.post('/api/queue/claim', (req, res) => { // next ready -> drawing. Mine first, then unassigned, then jobs whose robot has gone quiet
+app.post('/api/queue/claim', studioAuth, (req, res) => { // next ready -> drawing. Mine first, then unassigned, then jobs whose robot has gone quiet
   const bot = Math.max(1, +(req.body && req.body.bot) || 1); if (unmanned() && paperWait.has(bot)) return res.json({ job: null, wait: 'paper', since: paperWait.get(bot).since, number: paperWait.get(bot).number }); if (!unmanned()) paperWait.delete(bot); const ready = sortedJobs().filter(j => j.status === 'ready');
   const j = ready.find(j => j.bot === bot) || ready.find(j => !j.bot || j.bot > botCount()) || ready.find(j => botStale(j.bot)); if (!j) return res.json({ job: null });
-  j.status = 'drawing'; j.bot = bot; j.drawStartedAt = Date.now(); saveJob(j); res.json({ job: publicJob(j) });
+  j.status = 'drawing'; j.bot = bot; j.drawStartedAt = Date.now(); if (req.user) j.operator = req.user.name; saveJob(j); res.json({ job: publicJob(j) });
 });
-app.post('/api/bots/heartbeat', (req, res) => { const b = req.body || {}; const n = Math.max(1, Math.min(8, +b.bot || 1)); bots.set(n, { bot: n, connected: !!b.connected, status: String(b.status || '').slice(0, 80), jobId: b.jobId || null, number: b.number || null, progress: +b.progress || 0, seen: Date.now() }); res.json({ ok: true, bots: botList() }); });
+app.post('/api/bots/heartbeat', studioAuth, (req, res) => { const b = req.body || {}; const n = Math.max(1, Math.min(8, +b.bot || 1)); bots.set(n, { bot: n, connected: !!b.connected, status: String(b.status || '').slice(0, 80), jobId: b.jobId || null, number: b.number || null, progress: +b.progress || 0, seen: Date.now() }); res.json({ ok: true, bots: botList() }); });
 function botList() { const n = botCount(); const out = []; for (let i = 1; i <= n; i++) { const b = bots.get(i); out.push(b && Date.now() - b.seen < 30000 ? Object.assign({ live: true, waiting: botLoad(i) }, b) : { bot: i, live: false, connected: false, status: 'no Studio tab open', waiting: botLoad(i) }); } return out; }
 app.get('/api/bots', (req, res) => res.json({ bots: botList(), count: botCount() }));
-app.post('/api/queue/claim-id/:id', (req, res) => { const j = jobs.get(req.params.id); if (!j) return res.status(404).end(); j.status = 'drawing'; j.drawStartedAt = j.drawStartedAt || Date.now(); saveJob(j); res.json({ job: publicJob(j) }); }); // resume after a reload
-app.post('/api/jobs/:id/status', (req, res) => { const j = jobs.get(req.params.id); if (!j) return res.status(404).end(); const st = String(req.body.status); if (!['done', 'ready', 'skipped', 'failed'].includes(st)) return res.status(400).end(); j.status = st; if (st === 'done') { j.doneAt = Date.now(); if (unmanned() && !j.test) paperWait.set(j.bot || 1, { since: Date.now(), number: j.number }); } if (req.body.error) j.error = String(req.body.error); else if (st === 'done') j.error = null;
+app.post('/api/queue/claim-id/:id', studioAuth, (req, res) => { const j = jobs.get(req.params.id); if (!j) return res.status(404).end(); j.status = 'drawing'; j.drawStartedAt = j.drawStartedAt || Date.now(); saveJob(j); res.json({ job: publicJob(j) }); }); // resume after a reload
+app.post('/api/jobs/:id/status', studioAuth, (req, res) => { const j = jobs.get(req.params.id); if (!j) return res.status(404).end(); const st = String(req.body.status); if (!['done', 'ready', 'skipped', 'failed'].includes(st)) return res.status(400).end(); j.status = st; if (st === 'done') { j.doneAt = Date.now(); if (unmanned() && !j.test) paperWait.set(j.bot || 1, { since: Date.now(), number: j.number }); } if (req.body.error) j.error = String(req.body.error); else if (st === 'done') j.error = null;
   for (const k of ['drawSeconds', 'strokes', 'widthMm']) if (req.body[k] != null && isFinite(+req.body[k])) j[k] = Math.round(+req.body[k] * 10) / 10; if (req.body.preset) j.preset = String(req.body.preset).slice(0, 60); // draw-time log
   saveJob(j); res.json(publicJob(j)); });
 
 // ----- admin -----
-app.post('/api/admin/login', (req, res) => { if ((req.body.password || '') === ADMIN_PASSWORD) res.json({ ok: true, token: ADMIN_PASSWORD }); else res.status(401).json({ error: 'wrong password' }); });
-app.get('/api/admin/state', adminAuth, (req, res) => res.json({ settings: getSettings(), themes: listThemes(), variants: VARIANT_LABELS, variantOrder: VARIANTS, jobs: sortedJobs().filter(j => !j.test).slice(-200).map(j => Object.assign(publicJob(j), { guestName: j.guestName, priority: j.priority })), hasKey: !!OPENAI_KEY, durable: !!bucket, readOnly: !!bucket && !IS_DEPLOYMENT }));
+app.post('/api/admin/login', (req, res) => { // admin: the ADMIN_PASSWORD secret (name optional); operators: name + their own password
+  const name = String(req.body.name || '').trim(), pw = String(req.body.password || '');
+  if ((!name || name.toLowerCase() === 'admin') && pw && pw === ADMIN_PASSWORD) return res.json({ ok: true, token: newSession({ name: 'admin', role: 'admin' }), name: 'admin', role: 'admin' });
+  const u = loadUsers().find(u => u.name.toLowerCase() === name.toLowerCase()); if (!u || u.enabled === false || !checkPw(pw, u.hash)) return res.status(401).json({ error: 'wrong name or password' });
+  u.lastLogin = Date.now(); saveUsers(loadUsers().map(x => x.id === u.id ? u : x));
+  res.json({ ok: true, token: newSession({ userId: u.id, name: u.name, role: u.role }), name: u.name, role: u.role === 'admin' ? 'admin' : 'operator' });
+});
+app.post('/api/logout', (req, res) => { const t = req.get('x-admin-token') || ''; if (sessions.delete(t)) saveSessions(); res.json({ ok: true }); });
+app.get('/api/me', opAuth, (req, res) => res.json(req.user));
+const safeUser = u => ({ id: u.id, name: u.name, role: u.role, enabled: u.enabled !== false, createdAt: u.createdAt, lastLogin: u.lastLogin || null });
+app.get('/api/admin/users', adminAuth, (req, res) => res.json({ users: loadUsers().map(safeUser) }));
+app.post('/api/admin/users', adminAuth, (req, res) => { const name = String(req.body.name || '').trim().slice(0, 30), pw = String(req.body.password || ''); if (!name || name.toLowerCase() === 'admin') return res.status(400).json({ error: 'name required' }); if (pw.length < 4) return res.status(400).json({ error: 'password must be at least 4 characters' });
+  const users = loadUsers(); if (users.some(u => u.name.toLowerCase() === name.toLowerCase())) return res.status(400).json({ error: 'that name is taken' });
+  const u = { id: crypto.randomBytes(4).toString('hex'), name, role: req.body.role === 'admin' ? 'admin' : 'operator', hash: hashPw(pw), enabled: true, createdAt: Date.now() }; users.push(u); saveUsers(users); res.json({ ok: true, user: safeUser(u) }); });
+app.post('/api/admin/users/:id', adminAuth, (req, res) => { const users = loadUsers(); const u = users.find(u => u.id === req.params.id); if (!u) return res.status(404).end();
+  if ('enabled' in req.body) u.enabled = !!req.body.enabled; if (req.body.role) u.role = req.body.role === 'admin' ? 'admin' : 'operator'; if (req.body.password) { if (String(req.body.password).length < 4) return res.status(400).json({ error: 'password must be at least 4 characters' }); u.hash = hashPw(req.body.password); }
+  saveUsers(users); if (u.enabled === false || req.body.password) { for (const [t, se] of sessions) if (se.userId === u.id) sessions.delete(t); saveSessions(); } res.json({ ok: true, user: safeUser(u) }); });
+app.delete('/api/admin/users/:id', adminAuth, (req, res) => { saveUsers(loadUsers().filter(u => u.id !== req.params.id)); for (const [t, se] of sessions) if (se.userId === req.params.id) sessions.delete(t); saveSessions(); res.json({ ok: true }); });
+app.get('/api/admin/state', opAuth, (req, res) => { const s = getSettings(); const jobsOut = sortedJobs().filter(j => !j.test).slice(-200).map(j => Object.assign(publicJob(j), { guestName: j.guestName, priority: j.priority, operator: j.operator || null }));
+  if (req.user.role !== 'admin') return res.json({ me: req.user, settings: { bots: s.bots, pay: s.pay, staffing: s.staffing, eventName: s.eventName, eventMode: s.eventMode }, themes: listThemes().map(t => ({ slug: t.slug, name: t.name })), variants: VARIANT_LABELS, variantOrder: VARIANTS, jobs: jobsOut, hasKey: !!OPENAI_KEY, durable: !!bucket, readOnly: !!bucket && !IS_DEPLOYMENT });
+  res.json({ me: req.user, settings: s, themes: listThemes(), variants: VARIANT_LABELS, variantOrder: VARIANTS, jobs: jobsOut, hasKey: !!OPENAI_KEY, durable: !!bucket, readOnly: !!bucket && !IS_DEPLOYMENT }); });
 app.post('/api/admin/settings', adminAuth, (req, res) => { const body = req.body || {}; const allowed = ['model', 'quality', 'size', 'moderation', 'concurrency', 'eventName', 'cameraZoom', 'bots', 'textModel', 'foundations', 'safetyFoundation', 'eventMode', 'testModels', 'pay', 'presets', 'staffing']; const s = getSettings(); if (body.staffing) body.staffing = body.staffing === 'unmanned' ? 'unmanned' : 'manned'; for (const k of allowed) if (k in body) s[k] = body[k]; if (body.pay) s.pay = cleanPay(body.pay); saveSettings(s); res.json(Object.assign({ ok: true, durable: !!bucket && IS_DEPLOYMENT }, s)); });
 const PRESET_KEYS = ['eventName', 'eventMode', 'bots', 'concurrency', 'pay', 'staffing']; // what an event preset remembers
 app.post('/api/admin/presets', adminAuth, (req, res) => { // save the current settings (or the body's) as a named event type
@@ -504,9 +543,9 @@ app.post('/api/admin/lab-clear', adminAuth, (req, res) => { // wipe lab results:
 });
 app.delete('/api/admin/lab/:id', adminAuth, (req, res) => { const j = jobs.get(req.params.id); if (j && j.lab) { const slug = thumbSources()[j.id]; if (slug) { const t = readTheme(slug); if (t) { fs.rmSync(path.join(THEMES, slug, 'thumb.png'), { force: true }); unpersistFile(path.join(THEMES, slug, 'thumb.png')); t.thumbFrom = ''; writeTheme(slug, t); } } // deleting the thumbnail result removes the tile picture too
     jobs.delete(j.id); fs.rmSync(path.join(JOBS, j.id), { recursive: true, force: true }); unpersist(path.join(JOBS, j.id)); } res.json({ ok: true }); });
-app.post('/api/admin/jobs/:id', adminAuth, (req, res) => { // actions: retry, front, skip, requeue (draw again)
+app.post('/api/admin/jobs/:id', opAuth, (req, res) => { // actions: retry, front, skip, requeue (draw again)
   const j = jobs.get(req.params.id); if (!j) return res.status(404).end();
-  const a = req.body.action;
+  const a = req.body.action; if (req.user && ['paid', 'requeue', 'skip', 'archive', 'delete'].includes(a)) j.lastBy = req.user.name;
   if (a === 'retry') { j.status = 'pending'; j.attempts = 0; j.error = null; }
   else if (a === 'front') { j.priority = -Date.now(); }
   else if (a === 'skip') { j.status = 'skipped'; }
@@ -517,7 +556,7 @@ app.post('/api/admin/jobs/:id', adminAuth, (req, res) => { // actions: retry, fr
   else if (a === 'delete') { jobs.delete(j.id); fs.rmSync(path.join(JOBS, j.id), { recursive: true, force: true }); unpersist(path.join(JOBS, j.id)); return res.json({ ok: true }); }
   saveJob(j); pump(); res.json(publicJob(j));
 });
-app.post('/api/admin/jobs-bulk', adminAuth, (req, res) => { // { ids: [...], action: 'archive' | 'delete' | 'requeue' | 'skip' }
+app.post('/api/admin/jobs-bulk', opAuth, (req, res) => { // { ids: [...], action: 'archive' | 'delete' | 'requeue' | 'skip' }
   const ids = Array.isArray(req.body.ids) ? req.body.ids : [], a = req.body.action; let n = 0;
   for (const id of ids) { const j = jobs.get(id); if (!j) continue; n++;
     if (a === 'delete') { jobs.delete(j.id); fs.rmSync(path.join(JOBS, j.id), { recursive: true, force: true }); unpersist(path.join(JOBS, j.id)); continue; }
@@ -525,7 +564,7 @@ app.post('/api/admin/jobs-bulk', adminAuth, (req, res) => { // { ids: [...], act
     saveJob(j); }
   pump(); res.json({ ok: true, n });
 });
-app.get('/api/admin/drawlog.csv', adminAuth, (req, res) => { // every drawing that finished, oldest first, in the admin's local time
+app.get('/api/admin/drawlog.csv', opAuth, (req, res) => { // every drawing that finished, oldest first, in the admin's local time
   const tz = String(req.query.tz || 'America/Los_Angeles'); let fmtD, fmtT;
   try { fmtD = new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }); fmtT = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }); }
   catch (_) { fmtD = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' }); fmtT = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }); }
@@ -535,11 +574,11 @@ app.get('/api/admin/drawlog.csv', adminAuth, (req, res) => { // every drawing th
     // draw_seconds is the arm's measured time (logged since the draw-time feature); older rows fall back to claim→done, which includes conversion/preview
     const sec = j.drawSeconds || (j.drawStartedAt && j.doneAt > j.drawStartedAt ? Math.round((j.doneAt - j.drawStartedAt) / 10) / 100 : 0); const src = j.drawSeconds ? 'measured' : sec ? 'claim-to-done' : '';
     if (sec) { total += sec; timed++; if (j.drawSeconds) measured++; } const pay = j.pay || {}; if (pay.paidAt && pay.amount) { revenue += pay.amount; paidN++; }
-    rows.push([j.number, j.themeName, VARIANT_LABELS[j.variant] || j.variant, fmtD.format(j.createdAt), fmtT.format(j.createdAt), fmtD.format(j.doneAt), fmtT.format(j.doneAt), j.widthMm ? (j.widthMm / 25.4).toFixed(2) : '', j.strokes || '', sec || '', mmss(sec), src, j.preset || '', j.status, pay.label || pay.size || '', pay.amount ? (pay.amount / 100).toFixed(2) : '', pay.method || '']);
+    rows.push([j.number, j.themeName, VARIANT_LABELS[j.variant] || j.variant, fmtD.format(j.createdAt), fmtT.format(j.createdAt), fmtD.format(j.doneAt), fmtT.format(j.doneAt), j.widthMm ? (j.widthMm / 25.4).toFixed(2) : '', j.strokes || '', sec || '', mmss(sec), src, j.preset || '', j.status, pay.label || pay.size || '', pay.amount ? (pay.amount / 100).toFixed(2) : '', pay.method || '', j.operator || '']);
   }
   const esc = v => /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
-  const lines = ['number,theme,variant,photo_date,photo_time,drawn_date,drawn_time,width_in,strokes,draw_seconds,draw_mm_ss,time_source,speed_preset,status,size,paid_usd,paid_by', ...rows.map(r => r.map(esc).join(','))];
-  lines.push('', `TOTAL,${rows.length} drawings,,,,,,,,${Math.round(total * 10) / 10},${mmss(total)},${timed} timed (${measured} measured),,,,${(revenue / 100).toFixed(2)},${paidN} paid`);
+  const lines = ['number,theme,variant,photo_date,photo_time,drawn_date,drawn_time,width_in,strokes,draw_seconds,draw_mm_ss,time_source,speed_preset,status,size,paid_usd,paid_by,operator', ...rows.map(r => r.map(esc).join(','))];
+  lines.push('', `TOTAL,${rows.length} drawings,,,,,,,,${Math.round(total * 10) / 10},${mmss(total)},${timed} timed (${measured} measured),,,,${(revenue / 100).toFixed(2)},${paidN} paid,`);
   if (timed) lines.push(`AVERAGE,,,,,,,,,${Math.round(total / timed * 10) / 10},${mmss(total / timed)},per timed drawing,,`);
   res.setHeader('content-type', 'text/csv'); res.setHeader('content-disposition', 'attachment; filename="sketchy-draw-log.csv"');
   res.send(lines.join('\n'));
@@ -595,7 +634,7 @@ app.get('/api/admin/themes/export', adminAuth, async (req, res) => { // ?slug=ro
     const th = path.join(THEMES, t.slug, 'thumb.png'); if (await ensureLocal(th)) zip.addFile(`${dir}/thumbnail.png`, fs.readFileSync(th)); }
   res.setHeader('content-type', 'application/zip'); res.setHeader('content-disposition', `attachment; filename="${req.query.slug ? which[0] ? which[0].name.replace(/[^\w.-]+/g, '-') : 'theme' : 'sketchy-themes'}.zip"`); res.send(zip.toBuffer());
 });
-app.get('/api/admin/jobs-zip', adminAuth, async (req, res) => { // full-size line art (+ photos) for the chosen jobs, as a zip
+app.get('/api/admin/jobs-zip', opAuth, async (req, res) => { // full-size line art (+ photos) for the chosen jobs, as a zip
   const AdmZip = require('adm-zip'); const zip = new AdmZip(); const ids = String(req.query.ids || '').split(',').filter(Boolean); const withPhotos = req.query.photos === '1'; let n = 0;
   for (const id of ids) { const j = jobs.get(id); if (!j) continue; const base = `sketch-${String(j.number).padStart(3, '0')}-${slugify(j.themeName || 'theme')}`;
     const art = path.join(JOBS, j.id, 'art.png'); if (await ensureLocal(art)) { zip.addFile(`${base}.png`, fs.readFileSync(art)); n++; }
