@@ -29,6 +29,7 @@ const BUCKET_ID = process.env.OBJECT_STORAGE_BUCKET || process.env.DEFAULT_OBJEC
 try { if (BUCKET_ID || process.env.REPL_ID) { const { Client } = require(process.env.OBJECT_STORAGE_MODULE || '@replit/object-storage'); bucket = new Client(BUCKET_ID ? { bucketId: BUCKET_ID } : undefined); } } catch (e) { console.log('object storage not available:', e.message); bucket = null; }
 const rel = f => path.relative(DATA, f).split(path.sep).join('/');
 function persist(file) { if (!bucket || !IS_DEPLOYMENT) return; const key = rel(file); fs.promises.readFile(file).then(buf => bucket.uploadFromBytes(key, buf)).then(r => { if (r && !r.ok) console.error('storage upload failed', key, r.error && r.error.message); }).catch(e => console.error('storage upload', key, e.message)); }
+function unpersistFile(f) { if (!bucket || !IS_DEPLOYMENT) return; bucket.delete(rel(f)).catch(() => {}); }
 function unpersist(prefix) { if (!bucket || !IS_DEPLOYMENT) return; bucket.list().then(r => { if (!r.ok) return; for (const o of r.value) if (o.name.startsWith(rel(prefix) + '/')) bucket.delete(o.name).catch(() => {}); }).catch(() => {}); }
 const toBuf = d => Array.isArray(d.value) ? Buffer.concat(d.value.map(x => Buffer.isBuffer(x) ? x : Buffer.from(x))) : Buffer.from(d.value); // real SDK returns [Buffer]
 async function download(key, dest) { let d; try { d = await bucket.downloadAsBytes(key); } catch (e) { return false; } if (!d.ok) return false; fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.writeFileSync(dest, toBuf(d)); return true; }
@@ -78,7 +79,7 @@ function listThemes() { return fs.readdirSync(THEMES).filter(s => !s.startsWith(
 function writeTheme(slug, t) {
   const dir = path.join(THEMES, slug); fs.mkdirSync(path.join(dir, 'prompts'), { recursive: true });
   const vm = {}; for (const v of VARIANTS) { const x = t.variantModels && t.variantModels[v]; if (x && (x.model || x.quality)) vm[v] = { model: x.model || '', quality: x.quality || '' }; }
-  fs.writeFileSync(path.join(dir, 'theme.json'), JSON.stringify({ name: t.name, enabled: t.enabled !== false, order: t.order || 0, model: t.model || '', quality: t.quality || '', moderation: t.moderation || '', rating: t.rating === 'adult' ? 'adult' : 'family', proportions: t.proportions === 'bighead' ? 'bighead' : 'normal', variantModels: vm }, null, 2)); persist(path.join(dir, 'theme.json')); // model/quality: blank = use Settings; variantModels: per-combination overrides
+  fs.writeFileSync(path.join(dir, 'theme.json'), JSON.stringify({ name: t.name, enabled: t.enabled !== false, order: t.order || 0, model: t.model || '', quality: t.quality || '', moderation: t.moderation || '', rating: t.rating === 'adult' ? 'adult' : 'family', proportions: t.proportions === 'bighead' ? 'bighead' : 'normal', variantModels: vm, thumbFrom: t.thumbFrom || '' }, null, 2)); persist(path.join(dir, 'theme.json')); // model/quality: blank = use Settings; variantModels: per-combination overrides
   if (t.prompts) for (const v of VARIANTS) if (v in t.prompts) { const f = path.join(dir, 'prompts', v + '.txt'); fs.writeFileSync(f, String(t.prompts[v] || '')); persist(f); }
 }
 
@@ -249,7 +250,7 @@ app.post('/api/admin/settings', adminAuth, (req, res) => { const body = req.body
 app.post('/api/admin/themes', adminAuth, (req, res) => { const name = String(req.body.name || '').trim(); if (!name) return res.status(400).json({ error: 'name required' }); let slug = slugify(name); if (readTheme(slug)) slug += '-' + Date.now().toString(36); writeTheme(slug, { name, enabled: true, order: listThemes().length + 1, prompts: {} }); res.json(readTheme(slug)); });
 app.put('/api/admin/themes/:slug', adminAuth, (req, res) => { const t = readTheme(slugify(req.params.slug)); if (!t) return res.status(404).end(); writeTheme(t.slug, Object.assign(t, req.body, { prompts: Object.assign(t.prompts, req.body.prompts || {}), variantModels: Object.assign(t.variantModels, req.body.variantModels || {}) })); res.json(readTheme(t.slug)); });
 app.delete('/api/admin/themes/:slug', adminAuth, (req, res) => { const d = path.join(THEMES, slugify(req.params.slug)); if (fs.existsSync(d)) { fs.rmSync(d, { recursive: true }); unpersist(d); } res.json({ ok: true }); });
-app.post('/api/admin/themes/:slug/thumb', adminAuth, upload.single('thumb'), async (req, res) => { const t = readTheme(slugify(req.params.slug)); if (!t || !req.file) return res.status(400).end(); await sharp(req.file.buffer).rotate().resize(700, 700, { fit: 'inside', withoutEnlargement: true }).png().toFile(path.join(THEMES, t.slug, 'thumb.png')); persist(path.join(THEMES, t.slug, 'thumb.png')); res.json({ ok: true }); });
+app.post('/api/admin/themes/:slug/thumb', adminAuth, upload.single('thumb'), async (req, res) => { const t = readTheme(slugify(req.params.slug)); if (!t || !req.file) return res.status(400).end(); if (t.thumbFrom) { t.thumbFrom = ''; writeTheme(t.slug, t); } await sharp(req.file.buffer).rotate().resize(700, 700, { fit: 'inside', withoutEnlargement: true }).png().toFile(path.join(THEMES, t.slug, 'thumb.png')); persist(path.join(THEMES, t.slug, 'thumb.png')); res.json({ ok: true }); });
 let modelCache = null; // { models, at } — the key's image models, refetched after an hour
 app.get('/api/admin/models', adminAuth, async (req, res) => {
   try {
@@ -306,10 +307,14 @@ app.post('/api/admin/lab', adminAuth, upload.single('photo'), async (req, res) =
     res.json({ batch, results, async: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-function labJob(j) { return { id: j.id, batch: j.batch, note: j.note || null, startedAt: j.startedAt || null, photoHash: j.photoHash || j.batch, theme: j.theme, themeName: j.themeName, variant: j.variant, createdAt: j.createdAt, status: j.status, error: j.error, seconds: j.seconds, prompt: j.labPrompt, model: j.labModel, used: j.used, droppedParam: j.droppedParam, art: j.status === 'test' ? `/api/jobs/${j.id}/art` : null, photo: `/api/jobs/${j.id}/photo`, applied: j.applied || null }; }
+const thumbSources = () => { const m = {}; for (const t of listThemes()) if (t.thumbFrom) m[t.thumbFrom] = t.slug; return m; };
+function labJob(j, ts) { ts = ts || thumbSources(); return { id: j.id, isThumb: ts[j.id] || null, batch: j.batch, note: j.note || null, startedAt: j.startedAt || null, photoHash: j.photoHash || j.batch, theme: j.theme, themeName: j.themeName, variant: j.variant, createdAt: j.createdAt, status: j.status, error: j.error, seconds: j.seconds, prompt: j.labPrompt, model: j.labModel, used: j.used, droppedParam: j.droppedParam, art: j.status === 'test' ? `/api/jobs/${j.id}/art` : null, photo: `/api/jobs/${j.id}/photo`, applied: j.applied || null }; }
 const LAB_REFS = path.join(DATA, 'lab-refs.json'); // { hidden: [photoHash] } — reference photos removed from the Lab's strip (results keep their photo)
 const labRefs = () => { try { return JSON.parse(fs.readFileSync(LAB_REFS, 'utf8')); } catch (_) { return { hidden: [] }; } };
-app.get('/api/admin/lab', adminAuth, (req, res) => res.json({ results: [...jobs.values()].filter(j => j.lab).sort((a, b) => b.createdAt - a.createdAt).slice(0, 80).map(labJob), hiddenRefs: labRefs().hidden }));
+app.get('/api/admin/lab', adminAuth, (req, res) => { // newest first; up to 200 per theme, and a result that is a theme's thumbnail is always listed
+  const ts = thumbSources(); const per = {}; const out = [];
+  for (const j of [...jobs.values()].filter(j => j.lab).sort((a, b) => b.createdAt - a.createdAt)) { const k = j.theme || ''; per[k] = (per[k] || 0) + 1; if (per[k] <= 200 || ts[j.id]) out.push(labJob(j, ts)); }
+  res.json({ results: out, hiddenRefs: labRefs().hidden }); });
 app.post('/api/admin/lab/refs/hide', adminAuth, (req, res) => { const r = labRefs(); const h = String(req.body.hash || ''); if (h && !r.hidden.includes(h)) r.hidden.push(h); fs.writeFileSync(LAB_REFS, JSON.stringify(r)); persist(LAB_REFS); res.json({ ok: true }); });
 app.post('/api/admin/lab/:id/apply', adminAuth, (req, res) => { // make this result the master prompt + model for a theme/combination
   const j = jobs.get(req.params.id); if (!j || !j.lab) return res.status(404).end();
@@ -323,6 +328,7 @@ app.post('/api/admin/lab/:id/thumb', adminAuth, async (req, res) => { // use thi
   const theme = readTheme(slugify(req.body.theme || j.theme)); if (!theme) return res.status(400).json({ error: 'bad theme' });
   const art = path.join(JOBS, j.id, 'art.png'); if (!(await ensureLocal(art))) return res.status(404).json({ error: 'no image for this result' });
   await sharp(art).resize(700, 700, { fit: 'inside', withoutEnlargement: true }).png().toFile(path.join(THEMES, theme.slug, 'thumb.png')); persist(path.join(THEMES, theme.slug, 'thumb.png'));
+  theme.thumbFrom = j.id; writeTheme(theme.slug, theme); // this result is now the tile picture: marked in the Lab and protected from "clear"
   res.json({ ok: true, theme: theme.slug });
 });
 // ----- reference-face library (shared by the Lab and the Theme Builder) -----
@@ -431,11 +437,13 @@ app.post('/api/admin/lab/theme-test', adminAuth, async (req, res) => {
 });
 app.post('/api/admin/lab-clear', adminAuth, (req, res) => { // wipe lab results: all, one theme, or everything except results in use
   const scope = String(req.body.scope || 'all'); const theme = req.body.theme ? slugify(req.body.theme) : null; let n = 0;
-  for (const j of [...jobs.values()]) { if (!j.lab) continue; if (scope === 'theme' && j.theme !== theme) continue; if (req.body.keepApplied && j.applied) continue;
+  const ts = thumbSources();
+  for (const j of [...jobs.values()]) { if (!j.lab) continue; if (scope === 'theme' && j.theme !== theme) continue; if (req.body.keepApplied && j.applied) continue; if (ts[j.id]) continue; // thumbnails are only removed one at a time
     jobs.delete(j.id); fs.rmSync(path.join(JOBS, j.id), { recursive: true, force: true }); unpersist(path.join(JOBS, j.id)); n++; }
   res.json({ ok: true, n });
 });
-app.delete('/api/admin/lab/:id', adminAuth, (req, res) => { const j = jobs.get(req.params.id); if (j && j.lab) { jobs.delete(j.id); fs.rmSync(path.join(JOBS, j.id), { recursive: true, force: true }); unpersist(path.join(JOBS, j.id)); } res.json({ ok: true }); });
+app.delete('/api/admin/lab/:id', adminAuth, (req, res) => { const j = jobs.get(req.params.id); if (j && j.lab) { const slug = thumbSources()[j.id]; if (slug) { const t = readTheme(slug); if (t) { fs.rmSync(path.join(THEMES, slug, 'thumb.png'), { force: true }); unpersistFile(path.join(THEMES, slug, 'thumb.png')); t.thumbFrom = ''; writeTheme(slug, t); } } // deleting the thumbnail result removes the tile picture too
+    jobs.delete(j.id); fs.rmSync(path.join(JOBS, j.id), { recursive: true, force: true }); unpersist(path.join(JOBS, j.id)); } res.json({ ok: true }); });
 app.post('/api/admin/jobs/:id', adminAuth, (req, res) => { // actions: retry, front, skip, requeue (draw again)
   const j = jobs.get(req.params.id); if (!j) return res.status(404).end();
   const a = req.body.action;
