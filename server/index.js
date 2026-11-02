@@ -220,7 +220,8 @@ app.post('/api/jobs', upload.single('photo'), async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/jobs/:id', (req, res) => { const j = jobs.get(req.params.id); if (!j) return res.status(404).json({ error: 'not found' }); res.json(Object.assign(publicJob(j), { position: queuePosition(j.id) })); });
-app.get('/api/jobs/:id/art', async (req, res) => { const f = path.join(JOBS, req.params.id, req.query.thumb ? 'art-thumb.png' : 'art.png'); if (await ensureLocal(f)) res.sendFile(f); else res.status(404).end(); });
+app.get('/api/jobs/:id/art', async (req, res) => { const f = path.join(JOBS, req.params.id, req.query.thumb ? 'art-thumb.png' : 'art.png'); if (!(await ensureLocal(f))) return res.status(404).end();
+  if (req.query.download) { const j = jobs.get(req.params.id) || {}; res.setHeader('content-disposition', `attachment; filename="sketch-${String(j.number || 0).padStart(3, '0')}-${slugify(j.themeName || 'theme')}.png"`); } res.sendFile(f); });
 
 // ----- operator (studio) — unauthenticated on purpose: it only reads art and reports progress; the laptop is yours -----
 app.get('/api/queue', (req, res) => { res.json({ settings: getSettings(), bots: botList(), jobs: sortedJobs().filter(j => !j.test && !['done', 'skipped', 'archived'].includes(j.status)).map(publicJob), done: sortedJobs().filter(j => j.status === 'done').slice(-10).map(publicJob) }); });
@@ -382,6 +383,14 @@ app.get('/api/admin/themes/export', adminAuth, async (req, res) => { // ?slug=ro
     zip.addFile(`${dir}/theme.txt`, Buffer.from(lines.join('\n') + '\n', 'utf8'));
     const th = path.join(THEMES, t.slug, 'thumb.png'); if (await ensureLocal(th)) zip.addFile(`${dir}/thumbnail.png`, fs.readFileSync(th)); }
   res.setHeader('content-type', 'application/zip'); res.setHeader('content-disposition', `attachment; filename="${req.query.slug ? which[0] ? which[0].name.replace(/[^\w.-]+/g, '-') : 'theme' : 'sketchy-themes'}.zip"`); res.send(zip.toBuffer());
+});
+app.get('/api/admin/jobs-zip', adminAuth, async (req, res) => { // full-size line art (+ photos) for the chosen jobs, as a zip
+  const AdmZip = require('adm-zip'); const zip = new AdmZip(); const ids = String(req.query.ids || '').split(',').filter(Boolean); const withPhotos = req.query.photos === '1'; let n = 0;
+  for (const id of ids) { const j = jobs.get(id); if (!j) continue; const base = `sketch-${String(j.number).padStart(3, '0')}-${slugify(j.themeName || 'theme')}`;
+    const art = path.join(JOBS, j.id, 'art.png'); if (await ensureLocal(art)) { zip.addFile(`${base}.png`, fs.readFileSync(art)); n++; }
+    if (withPhotos) { const ph = path.join(JOBS, j.id, 'photo.jpg'); if (await ensureLocal(ph)) zip.addFile(`${base}-photo.jpg`, fs.readFileSync(ph)); } }
+  if (!n) return res.status(404).json({ error: 'none of those have line art yet' });
+  res.setHeader('content-type', 'application/zip'); res.setHeader('content-disposition', `attachment; filename="sketchy-line-art-${new Date().toISOString().slice(0, 10)}.zip"`); res.send(zip.toBuffer());
 });
 app.get('/api/jobs/:id/photo', adminAuth, async (req, res) => { const f = path.join(JOBS, req.params.id, 'photo.jpg'); if (await ensureLocal(f)) res.sendFile(f); else res.status(404).end(); });
 

@@ -50,7 +50,7 @@
   <section class="tab" id="tab-queue">
     <div class="card"><h2>Queue <span class="note" id="qsum"></span></h2>
       <div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:8px">
-        <button id="bArchive" disabled>Archive selected</button><button id="bRequeue" disabled>Put selected back in queue</button><button id="bDelete" class="danger" disabled>Delete selected</button>
+        <a id="bZip" href="#"><button disabled>Download selected (PNG zip)</button></a><a id="bZipP" href="#"><button disabled>…with photos</button></a><button id="bArchive" disabled>Archive selected</button><button id="bRequeue" disabled>Put selected back in queue</button><button id="bDelete" class="danger" disabled>Delete selected</button>
         <span class="note" id="selNote"></span>
         <span style="margin-left:auto"></span>
         <label class="note" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="showArchived"> Show archived</label>
@@ -142,7 +142,8 @@
   const fmt = ms => { const d = new Date(ms); return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
   const fmtS = sec => sec ? `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}` : '';
   const SEL = new Set();
-  function syncSel() { const n = SEL.size; for (const id of ['bArchive', 'bRequeue', 'bDelete']) $(id).disabled = !n; $('selNote').textContent = n ? `${n} selected` : ''; }
+  function syncSel() { const n = SEL.size; for (const id of ['bArchive', 'bRequeue', 'bDelete']) $(id).disabled = !n; $('selNote').textContent = n ? `${n} selected` : '';
+    const ids = encodeURIComponent(Array.from(SEL).join(',')); for (const [id, extra] of [['bZip', ''], ['bZipP', '&photos=1']]) { const a = $(id); a.querySelector('button').disabled = !n; a.href = n ? `/api/admin/jobs-zip?ids=${ids}${extra}&token=${encodeURIComponent(TOKEN)}` : '#'; } }
   const BOT_COLORS = ['#006df6', '#d7263d', '#1a9c4c', '#e67e22', '#8e44ad', '#0097a7', '#c2185b', '#5d4037'];
   async function renderBots() { const n = +STATE.settings.bots || 1; const strip = $('botStrip'); if (n <= 1) { strip.style.display = 'none'; return; } let list = []; try { list = (await api('/api/bots')).bots; } catch (_) { } strip.style.display = '';
     strip.innerHTML = list.map(b => `<div class="botCard ${b.live && b.connected ? 'on' : ''}" style="--c:${BOT_COLORS[(b.bot - 1) % BOT_COLORS.length]}"><b>Bot ${b.bot}</b><span>${b.live ? (b.connected ? (b.status === 'drawing' && b.number ? `drawing #${b.number} · ${Math.round(b.progress)}%` : b.status) : 'tab open, arm not connected') : 'no Studio tab open'}</span><span class="note">${b.waiting} waiting</span></div>`).join(''); }
@@ -159,7 +160,7 @@
       <td><input type="checkbox" class="selRow" data-id="${j.id}" ${SEL.has(j.id) ? 'checked' : ''}></td>
       <td><b>#${j.number}</b></td>
       <td><img src="/api/jobs/${j.id}/photo?token=${encodeURIComponent(TOKEN)}" onerror="this.style.display='none'"></td>
-      <td>${['ready', 'drawing', 'done', 'skipped', 'archived'].includes(j.status) ? `<a href="/api/jobs/${j.id}/art" target="_blank"><img src="/api/jobs/${j.id}/art?thumb=1"></a>` : ''}</td>
+      <td>${['ready', 'drawing', 'done', 'skipped', 'archived'].includes(j.status) ? `<a href="/api/jobs/${j.id}/art" target="_blank" title="Open full size in a new tab"><img src="/api/jobs/${j.id}/art?thumb=1"></a><br><a href="/api/jobs/${j.id}/art?download=1" class="note" title="Save the full-resolution PNG">⬇ PNG</a> · <a href="/api/jobs/${j.id}/photo?token=${encodeURIComponent(TOKEN)}" download="photo-${j.number}.jpg" class="note" title="Save the original photo">⬇ photo</a>` : ''}</td>
       <td>${j.themeName}<br><span class="note">${STATE.variants[j.variant] || j.variant}</span>${j.names ? `<br><b>${[j.names.a, j.names.b, j.names.pet].filter(Boolean).join(' & ')}</b>` : ''}</td>
       <td><span class="pill ${j.status}">${j.status}</span>${j.error ? `<br><span class="bad note">${j.error}</span>` : ''}</td>
       <td>${(STATE.settings.bots || 1) > 1 ? (j.status === 'ready' ? `<select data-assign="${j.id}" style="width:auto">${['<option value="0">any</option>'].concat(Array.from({ length: +STATE.settings.bots }, (_, i) => `<option value="${i + 1}" ${j.bot === i + 1 ? 'selected' : ''}>Bot ${i + 1}</option>`)).join('')}</select>` : (j.bot ? 'Bot ' + j.bot : '')) : ''}</td>
