@@ -8,7 +8,7 @@ async def main():
         # create an inactive theme via API
         req = urllib.request.Request(B+'/api/admin/themes', data=json.dumps({'name':'Pirate'}).encode(), headers={'content-type':'application/json','x-admin-token':'pw'}); t = json.load(urllib.request.urlopen(req))
         req = urllib.request.Request(B+'/api/admin/themes/'+t['slug'], data=json.dumps({'enabled':False}).encode(), headers={'content-type':'application/json','x-admin-token':'pw'}, method='PUT'); urllib.request.urlopen(req)
-        await pg.click('#nav [data-t=test]'); await pg.wait_for_timeout(600)
+        await pg.click('#nav [data-t=test]'); await pg.wait_for_timeout(600); await pg.evaluate("document.querySelector('#tab-test details').open = true")
         await pg.select_option('#tTheme', t['slug']); await pg.wait_for_timeout(200); await pg.select_option('#tVar', '1-female'); await pg.wait_for_timeout(200)
         print('box state:', await pg.text_content('#tBoxState'), '| theme option label has inactive:', 'inactive' in (await pg.text_content('#tTheme')))
         await pg.set_input_files('#tPhoto', '/home/claude/dexdraw/test/face.png'); await pg.fill('#tPrompt', 'Turn this person into a pirate line drawing')
@@ -26,7 +26,7 @@ async def main():
         await (await pg.query_selector_all('#labOut .lab button[data-thumb]'))[1].click(); await pg.wait_for_timeout(1000); print('thumb toast:', await pg.text_content('#toast'), '| thumb http:', urllib.request.urlopen(B+'/api/themes/'+t['slug']+'/thumb').status)
         print('applied card marked:', len(await pg.query_selector_all('#labOut .lab.applied')))
         # history + ref reuse
-        await pg.reload(); await pg.wait_for_timeout(1500); await pg.click('#nav [data-t=test]'); await pg.wait_for_timeout(500); await pg.select_option('#tTheme', t['slug']); await pg.wait_for_timeout(300)
+        await pg.reload(); await pg.wait_for_timeout(1500); await pg.click('#nav [data-t=test]'); await pg.wait_for_timeout(500); await pg.evaluate("document.querySelector('#tab-test details').open = true"); await pg.select_option('#tTheme', t['slug']); await pg.wait_for_timeout(300)
         print('history cards:', len(await pg.query_selector_all('#labHist .lab')), '| ref photos (same face twice → 1):', len(await pg.query_selector_all('#refStrip .ref')))
         await pg.click('#refStrip .ref .x'); await pg.wait_for_timeout(500); await pg.reload(); await pg.wait_for_timeout(1500); await pg.click('#nav [data-t=test]'); await pg.wait_for_timeout(500); print('refs after remove+reload:', len(await pg.query_selector_all('#refStrip .ref')), '| results kept:', len(json.load(urllib.request.urlopen(urllib.request.Request(B+'/api/admin/lab', headers={'x-admin-token':'pw'})))['results']))
         # used params recorded

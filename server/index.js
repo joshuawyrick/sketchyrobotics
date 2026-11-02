@@ -89,7 +89,7 @@ const jobs = new Map(); let seq = 0;
 function loadState() {
   if (!listThemes().length) writeTheme('evil-clown', { name: 'Evil Clown', enabled: true, order: 1, prompts: {} });
   for (const id of fs.readdirSync(JOBS)) { try { jobs.set(id, JSON.parse(fs.readFileSync(path.join(JOBS, id, 'job.json'), 'utf8'))); } catch (_) { } }
-  for (const j of jobs.values()) if (j.status === 'processing') { j.status = 'pending'; } // server restarted mid-call
+  for (const j of jobs.values()) if (j.status === 'processing') { if (j.lab) { j.status = 'failed'; j.error = 'server restarted while generating — run it again'; } else j.status = 'pending'; } // server restarted mid-call
   seq = Math.max(0, ...[...jobs.values()].map(j => j.number || 0));
 }
 function saveJob(j) { fs.mkdirSync(path.join(JOBS, j.id), { recursive: true }); const f = path.join(JOBS, j.id, 'job.json'); fs.writeFileSync(f, JSON.stringify(j, null, 2)); jobs.set(j.id, j); if (!j.test || j.lab) persist(f); }
@@ -130,6 +130,8 @@ async function generateArt(job, override) {
   const call = async (f) => { const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 180000);
     try { const r = await fetch(OPENAI_BASE + '/v1/images/edits', { method: 'POST', headers: { Authorization: 'Bearer ' + OPENAI_KEY }, body: f, signal: ctrl.signal }); return { res: r, body: await r.json().catch(() => ({})) }; } finally { clearTimeout(t); } };
   let { res, body } = await call(form);
+  for (let i = 0; i < 3 && (res.status === 429 || res.status >= 500); i++) { const wait = res.status === 429 ? 8000 * (i + 1) : 3000 * (i + 1); job.note = `${res.status === 429 ? 'rate limited' : 'server ' + res.status} — retrying in ${wait / 1000}s`; await new Promise(r => setTimeout(r, wait)); ({ res, body } = await call(form)); }
+  job.note = null;
   // a model that doesn't know a parameter says so ("does not support the 'moderation' parameter"); drop it and try again, up to 3 times
   for (let i = 0; i < 3 && !res.ok && body.error; i++) {
     const m = (body.error.message || '').match(/(?:does not support|not supported|unknown|unsupported|unrecognized)[^']*'([a-z_]+)'|'([a-z_]+)'[^.]*(?:is not supported|not supported|unknown)/i); const bad = m && (m[1] || m[2]);
@@ -295,19 +297,16 @@ app.post('/api/admin/lab', adminAuth, upload.single('photo'), async (req, res) =
     else if (req.body.refJob && jobs.has(req.body.refJob)) { const f = path.join(JOBS, req.body.refJob, 'photo.jpg'); if (await ensureLocal(f)) photo = fs.readFileSync(f); }
     if (!photo) return res.status(400).json({ error: 'add a reference photo' });
     const batch = 'lab-' + Date.now().toString(36); const photoHash = crypto.createHash('sha1').update(photo).digest('hex').slice(0, 16);
-    const runs = models.map(async model => {
+    const results = models.map(model => {
       const id = 'lab-' + crypto.randomBytes(4).toString('hex');
       const job = { id, number: 0, status: 'processing', theme: theme.slug, themeName: theme.name, variant, createdAt: Date.now(), attempts: 1, test: true, lab: true, batch, photoHash, labPrompt: prompt, labModel: model };
-      fs.mkdirSync(path.join(JOBS, id), { recursive: true }); fs.writeFileSync(path.join(JOBS, id, 'photo.jpg'), photo); if (true) persist(path.join(JOBS, id, 'photo.jpg'));
-      jobs.set(id, job); const t0 = Date.now();
-      const override = { model, prompt }; for (const k of ['quality', 'moderation']) if (req.body[k]) override[k] = String(req.body[k]);
-      try { await generateArt(job, override); job.status = 'test'; job.readyAt = Date.now(); } catch (e) { job.status = 'failed'; job.error = String(e.message || e); }
-      job.seconds = Math.round((Date.now() - t0) / 1000); saveJob(job); return labJob(job);
+      fs.mkdirSync(path.join(JOBS, id), { recursive: true }); fs.writeFileSync(path.join(JOBS, id, 'photo.jpg'), photo); persist(path.join(JOBS, id, 'photo.jpg'));
+      const override = { model, prompt }; for (const k of ['quality', 'moderation']) if (req.body[k]) override[k] = String(req.body[k]); labEnqueue(job, override); return labJob(job);
     });
-    res.json({ batch, results: await Promise.all(runs) });
+    res.json({ batch, results, async: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-function labJob(j) { return { id: j.id, batch: j.batch, photoHash: j.photoHash || j.batch, theme: j.theme, themeName: j.themeName, variant: j.variant, createdAt: j.createdAt, status: j.status, error: j.error, seconds: j.seconds, prompt: j.labPrompt, model: j.labModel, used: j.used, droppedParam: j.droppedParam, art: j.status === 'test' ? `/api/jobs/${j.id}/art` : null, photo: `/api/jobs/${j.id}/photo`, applied: j.applied || null }; }
+function labJob(j) { return { id: j.id, batch: j.batch, note: j.note || null, startedAt: j.startedAt || null, photoHash: j.photoHash || j.batch, theme: j.theme, themeName: j.themeName, variant: j.variant, createdAt: j.createdAt, status: j.status, error: j.error, seconds: j.seconds, prompt: j.labPrompt, model: j.labModel, used: j.used, droppedParam: j.droppedParam, art: j.status === 'test' ? `/api/jobs/${j.id}/art` : null, photo: `/api/jobs/${j.id}/photo`, applied: j.applied || null }; }
 const LAB_REFS = path.join(DATA, 'lab-refs.json'); // { hidden: [photoHash] } — reference photos removed from the Lab's strip (results keep their photo)
 const labRefs = () => { try { return JSON.parse(fs.readFileSync(LAB_REFS, 'utf8')); } catch (_) { return { hidden: [] }; } };
 app.get('/api/admin/lab', adminAuth, (req, res) => res.json({ results: [...jobs.values()].filter(j => j.lab).sort((a, b) => b.createdAt - a.createdAt).slice(0, 80).map(labJob), hiddenRefs: labRefs().hidden }));
@@ -411,6 +410,11 @@ app.post('/api/admin/builder/publish', adminAuth, async (req, res) => { // one f
     res.json({ ok: true, slug, name: readTheme(slug).name, isNew: !existing });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// lab generations run in the background a few at a time; the page polls /api/admin/lab for live status
+const labQueue = []; let labRunning = 0; const LAB_PARALLEL = 3;
+function labPump() { while (labRunning < LAB_PARALLEL && labQueue.length) { const { job, override } = labQueue.shift(); labRunning++; job.startedAt = Date.now(); job.note = 'sent to OpenAI'; saveJob(job);
+  generateArt(job, override).then(() => { job.status = 'test'; job.readyAt = Date.now(); }).catch(e => { job.status = 'failed'; job.error = String(e.message || e); }).finally(() => { job.seconds = Math.round((Date.now() - job.startedAt) / 1000); job.note = null; saveJob(job); labRunning--; labPump(); }); } }
+function labEnqueue(job, override) { job.status = 'processing'; job.note = `waiting (${labQueue.length} ahead)`; jobs.set(job.id, job); saveJob(job); labQueue.push({ job, override }); labPump(); }
 // ----- Lab: test every prompt a theme already has, one reference face per combination, across the ticked models -----
 app.post('/api/admin/lab/theme-test', adminAuth, async (req, res) => {
   try { const theme = readTheme(slugify(req.body.theme || '')); if (!theme) return res.status(400).json({ error: 'pick a theme' }); const st = getSettings();
@@ -418,13 +422,11 @@ app.post('/api/admin/lab/theme-test', adminAuth, async (req, res) => {
     const variants = VARIANTS.filter(v => theme.prompts[v] && theme.prompts[v].trim() && refs[v]); if (!variants.length) return res.status(400).json({ error: 'no combination has both a saved prompt and a reference face' });
     const batch = 'lab-' + Date.now().toString(36); const runs = [];
     for (const v of variants) { const photo = await refBuffer(refs[v]); if (!photo) continue; for (const model of models) runs.push({ v, model, photo }); }
-    const results = await Promise.all(runs.map(async ({ v, model, photo }) => { const id = 'lab-' + crypto.randomBytes(4).toString('hex');
+    const results = runs.map(({ v, model, photo }) => { const id = 'lab-' + crypto.randomBytes(4).toString('hex');
       const job = { id, number: 0, status: 'processing', theme: theme.slug, themeName: theme.name, variant: v, createdAt: Date.now(), attempts: 1, test: true, lab: true, batch, photoHash: refs[v], labPrompt: theme.prompts[v], labModel: model };
-      fs.mkdirSync(path.join(JOBS, id), { recursive: true }); fs.writeFileSync(path.join(JOBS, id, 'photo.jpg'), photo); persist(path.join(JOBS, id, 'photo.jpg')); jobs.set(id, job); const t0 = Date.now();
-      const override = { model, moderation: 'low' }; if (req.body.quality) override.quality = String(req.body.quality);
-      try { await generateArt(job, override); job.status = 'test'; job.readyAt = Date.now(); } catch (e) { job.status = 'failed'; job.error = String(e.message || e); }
-      job.seconds = Math.round((Date.now() - t0) / 1000); saveJob(job); return labJob(job); }));
-    res.json({ ok: true, batch, results });
+      fs.mkdirSync(path.join(JOBS, id), { recursive: true }); fs.writeFileSync(path.join(JOBS, id, 'photo.jpg'), photo); persist(path.join(JOBS, id, 'photo.jpg'));
+      const override = { model, moderation: 'low' }; if (req.body.quality) override.quality = String(req.body.quality); labEnqueue(job, override); return labJob(job); });
+    res.json({ ok: true, batch, results, async: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/admin/lab-clear', adminAuth, (req, res) => { // wipe lab results: all, one theme, or everything except results in use
