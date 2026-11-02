@@ -65,7 +65,7 @@
   <section class="tab" id="tab-themes">
     <div class="card"><h2>Themes</h2>
       <div class="grid" id="themeGrid"></div>
-      <div class="row" style="margin-top:12px"><input type="text" id="newName" placeholder="New theme name (e.g. Rockstar)" style="max-width:300px"><button class="primary" id="addTheme">+ Add theme</button><span style="margin-left:auto"></span><button id="importBtn" title="A zip with one folder per theme and one .md/.txt per combination">Import zip…</button><input type="file" id="importZip" accept=".zip,application/zip" style="display:none"><a id="exportAll" href="#"><button>Export all</button></a></div>
+      <div class="row" style="margin-top:12px"><input type="text" id="newName" placeholder="New theme name (e.g. Rockstar)" style="max-width:300px"><button class="primary" id="addTheme">+ Add theme</button><span style="margin-left:auto"></span><button id="importBtn" title="A zip with one folder per theme and one .md/.txt per combination">Import zip…</button><label class="note" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="importReplace"> Replace all prompts (boxes not in the zip are cleared)</label><input type="file" id="importZip" accept=".zip,application/zip" style="display:none"><a id="exportAll" href="#"><button>Export all</button></a></div>
       <div id="importReport" class="note" style="display:none;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;white-space:pre-wrap"></div>
     </div>
     <div class="card" id="themeEdit" style="display:none">
@@ -79,7 +79,7 @@
       <div class="row"><label>Thumbnail (any shape; shown whole)</label><input type="file" id="teThumb" accept="image/*"><img id="teThumbPrev" style="height:90px;max-width:160px;object-fit:contain;background:#fff;border-radius:8px;border:1px solid var(--line)"></div>
       <p class="note">Paste the locked-in master prompt for each combination. Leave a box empty and that option won't be offered on the iPad for this theme. Each prompt must stand on its own (style, line weight, white background, no shading…) — the guest's photo is attached as the input image.</p>
       <div id="prompts"></div>
-      <div class="row"><button class="primary" id="teSave">Save theme</button><button class="danger" id="teDelete">Delete theme</button><a id="exportOne" href="#"><button>Export this theme</button></a><span id="teMsg" class="ok"></span></div>
+      <div class="row"><button class="primary" id="teSave">Save theme</button><button class="danger" id="teDelete">Delete theme</button><a id="exportOne" href="#"><button>Export this theme</button></a><button id="importInto" title="Prompt files from the zip go into THIS theme whatever the folder is called; existing boxes are replaced and boxes not in the zip are cleared">Replace prompts from zip…</button><span id="teMsg" class="ok"></span></div>
     </div>
   </section>
 
@@ -206,17 +206,20 @@
   }
   $('addTheme').onclick = async () => { const name = $('newName').value.trim(); if (!name) return; const t = await api('/api/admin/themes', { method: 'POST', json: { name } }); $('newName').value = ''; editing = t.slug; await refresh(); openTheme(t.slug); toast('Theme "' + name + '" created — add prompts and a thumbnail, then Save'); };
   $('teSave').onclick = async () => { try { const prompts = {}; $('prompts').querySelectorAll('textarea').forEach(ta => prompts[ta.dataset.v] = ta.value); const variantModels = {}; $('prompts').querySelectorAll('.vmModel').forEach(sel => { variantModels[sel.dataset.v] = { model: sel.value, quality: $('prompts').querySelector(`.vmQ[data-v="${sel.dataset.v}"]`).value }; }); await api('/api/admin/themes/' + editing, { method: 'PUT', json: { name: $('teNameIn').value.trim() || 'Theme', enabled: $('teEnabled').checked, order: +$('teOrder').value || 0, model: $('teModel').value, quality: $('teQuality').value, moderation: $('teMod').value, prompts, variantModels } }); $('teMsg').textContent = 'Saved ✓'; toast('Theme "' + ($('teNameIn').value.trim() || 'Theme') + '" saved — prompts are live on the iPad'); setTimeout(() => $('teMsg').textContent = '', 4000); await refresh(); } catch (e) { toast('Save failed: ' + e.message, 'bad'); } };
-  $('importBtn').onclick = () => $('importZip').click();
+  let importTarget = null; // slug when importing into one chosen theme
+  $('importBtn').onclick = () => { importTarget = null; $('importZip').click(); };
+  $('importInto').onclick = () => { importTarget = editing; $('importZip').click(); };
   $('importZip').onchange = async () => {
     const f = $('importZip').files[0]; $('importZip').value = ''; if (!f) return; const rep = $('importReport'); rep.style.display = ''; rep.textContent = 'Reading ' + f.name + '…';
+    const q = (importTarget ? `&target=${encodeURIComponent(importTarget)}&mode=replace` : ($('importReplace').checked ? '&mode=replace' : ''));
     const fd = new FormData(); fd.append('zip', f);
     try {
-      const pv = await api('/api/admin/themes/import?preview=1', { method: 'POST', body: fd });
-      const lines = pv.themes.map(t => `${t.isNew ? 'NEW' : 'UPDATE'}  ${t.name} — ${t.prompts} prompt${t.prompts === 1 ? '' : 's'}${t.replaced.length ? ` (replacing: ${t.replaced.join(', ')})` : ''}${t.thumb ? ' · thumbnail' : ''}${t.settings.length ? ' · settings: ' + t.settings.join(', ') : ''}${t.unknown.length ? ` · SKIPPED (name not recognised): ${t.unknown.join(', ')}` : ''}`);
+      const pv = await api('/api/admin/themes/import?preview=1' + q, { method: 'POST', body: fd });
+      const lines = pv.themes.map(t => `${t.isNew ? 'NEW' : 'UPDATE'}  ${t.name} — ${t.prompts} prompt${t.prompts === 1 ? '' : 's'}${t.replaced.length ? ` (replacing: ${t.replaced.join(', ')})` : ''}${t.cleared && t.cleared.length ? ` (CLEARING: ${t.cleared.join(', ')})` : ''}${t.thumb ? ' · thumbnail' : ''}${t.settings.length ? ' · settings: ' + t.settings.join(', ') : ''}${t.unknown.length ? ` · SKIPPED (name not recognised): ${t.unknown.join(', ')}` : ''}`);
       if (!confirm('Import?\n\n' + lines.join('\n'))) { rep.textContent = 'Import cancelled.'; return; }
-      const fd2 = new FormData(); fd2.append('zip', f); const r = await api('/api/admin/themes/import', { method: 'POST', body: fd2 });
-      rep.textContent = r.themes.map(t => `${t.isNew ? 'Created' : 'Updated'} ${t.name}: ${t.prompts} prompts${t.thumb ? (t.thumbError ? ', thumbnail FAILED: ' + t.thumbError : ', thumbnail') : ''}${t.unknown.length ? '. Skipped: ' + t.unknown.join(', ') : ''}`).join('\n') + '\nNew themes are inactive until you tick Enabled and Save.';
-      toast(`Imported ${r.themes.length} theme${r.themes.length === 1 ? '' : 's'}`); await refresh();
+      const fd2 = new FormData(); fd2.append('zip', f); const r = await api('/api/admin/themes/import' + (q ? '?' + q.slice(1) : ''), { method: 'POST', body: fd2 });
+      rep.textContent = r.themes.map(t => `${t.isNew ? 'Created' : 'Updated'} ${t.name}: ${t.prompts} prompts${t.cleared && t.cleared.length ? ', cleared ' + t.cleared.length : ''}${t.thumb ? (t.thumbError ? ', thumbnail FAILED: ' + t.thumbError : ', thumbnail') : ''}${t.unknown.length ? '. Skipped: ' + t.unknown.join(', ') : ''}`).join('\n') + '\nNew themes are inactive until you tick Enabled and Save.';
+      toast(`Imported ${r.themes.length} theme${r.themes.length === 1 ? '' : 's'}`); await refresh(); if (importTarget) openTheme(importTarget);
     } catch (e) { rep.textContent = 'Import failed: ' + e.message; toast('Import failed: ' + e.message, 'bad'); }
   };
   $('teDelete').onclick = async () => { if (!confirm('Delete this theme and all its prompts?')) return; await api('/api/admin/themes/' + editing, { method: 'DELETE' }); editing = null; $('themeEdit').style.display = 'none'; refresh(); toast('Theme deleted'); };

@@ -342,10 +342,10 @@ app.get('/api/admin/drawlog.csv', adminAuth, (req, res) => { // every drawing th
 const VARIANT_FILES = { '1-male': ['single-male', '1-male', 'male', 'man'], '1-female': ['single-female', '1-female', 'female', 'woman'], '2-male-male': ['two-males', '2-male-male', 'male-male', 'two-men'], '2-female-female': ['two-females', '2-female-female', 'female-female', 'two-women'], '2-male-female': ['male-left-female-right', '2-male-female', 'male-female'], '2-female-male': ['female-left-male-right', '2-female-male', 'female-male'], 'pet-male': ['male-pet', 'pet-male', 'man-pet'], 'pet-female': ['female-pet', 'pet-female', 'woman-pet'] };
 const normName = n => String(n).toLowerCase().replace(/\.(md|markdown|txt)$/, '').replace(/[\s_\-]+/g, '');
 const variantFor = name => { const k = normName(name); for (const v of VARIANTS) if (VARIANT_FILES[v].some(a => a.replace(/-/g, '') === k)) return v; return null; };
-function parseZipThemes(buf) { // -> [{ name, prompts:{v:text}, thumb:Buffer|null, settings:{...}, unknown:[names] }]
+function parseZipThemes(buf, targetName) { // -> [{ name, prompts:{v:text}, thumb:Buffer|null, settings:{...}, unknown:[names] }]; targetName: every file goes to that one theme, folder names ignored
   const AdmZip = require('adm-zip'); const zip = new AdmZip(buf); const themes = new Map();
   for (const e of zip.getEntries()) { if (e.isDirectory) continue; const parts = e.entryName.split('/').filter(p => p && p !== '.'); if (parts.some(p => p.startsWith('__MACOSX') || p.startsWith('.'))) continue;
-    const file = parts[parts.length - 1]; let theme = parts.length >= 2 ? parts[parts.length - 2] : null; if (!theme) continue; // files must sit in a theme folder
+    const file = parts[parts.length - 1]; let theme = targetName || (parts.length >= 2 ? parts[parts.length - 2] : null); if (!theme) continue; // files must sit in a theme folder (unless importing into a chosen theme)
     const t = themes.get(theme) || { name: theme, prompts: {}, thumb: null, settings: {}, unknown: [] }; themes.set(theme, t);
     const low = file.toLowerCase();
     if (/^thumbnail\.(png|jpe?g|webp)$/.test(low)) { t.thumb = e.getData(); continue; }
@@ -356,16 +356,20 @@ function parseZipThemes(buf) { // -> [{ name, prompts:{v:text}, thumb:Buffer|nul
 }
 app.post('/api/admin/themes/import', adminAuth, upload.single('zip'), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: 'no zip' }); const preview = req.query.preview === '1'; const found = parseZipThemes(req.file.buffer); if (!found.length) return res.status(400).json({ error: 'No theme folders found. Each theme must be a folder containing its prompt files.' });
+    if (!req.file) return res.status(400).json({ error: 'no zip' }); const preview = req.query.preview === '1'; const replaceAll = req.query.mode === 'replace'; // replace: boxes with no file in the zip are cleared
+    const target = req.query.target ? readTheme(slugify(req.query.target)) : null; if (req.query.target && !target) return res.status(400).json({ error: 'target theme not found' });
+    const found = parseZipThemes(req.file.buffer, target ? target.name : null); if (!found.length) return res.status(400).json({ error: target ? 'No prompt files found in the zip.' : 'No theme folders found. Each theme must be a folder containing its prompt files.' });
     const report = [];
     for (const t of found) {
       let existing = listThemes().find(x => x.name.toLowerCase() === t.name.toLowerCase()); const slug = existing ? existing.slug : slugify(t.name);
       const replaced = existing ? Object.keys(t.prompts).filter(v => existing.prompts[v] && existing.prompts[v].trim() && existing.prompts[v].trim() !== t.prompts[v]) : [];
-      report.push({ name: t.name, slug, isNew: !existing, prompts: Object.keys(t.prompts).length, replaced: replaced.map(v => VARIANT_LABELS[v]), empty: Object.keys(t.prompts).filter(v => !t.prompts[v]).map(v => VARIANT_LABELS[v]), thumb: !!t.thumb, settings: Object.keys(t.settings), unknown: t.unknown });
+      const cleared = existing && replaceAll ? VARIANTS.filter(v => !(v in t.prompts) && existing.prompts[v] && existing.prompts[v].trim()) : [];
+      report.push({ name: t.name, slug, isNew: !existing, prompts: Object.keys(t.prompts).length, replaced: replaced.map(v => VARIANT_LABELS[v]), cleared: cleared.map(v => VARIANT_LABELS[v]), empty: Object.keys(t.prompts).filter(v => !t.prompts[v]).map(v => VARIANT_LABELS[v]), thumb: !!t.thumb, settings: Object.keys(t.settings), unknown: t.unknown });
       if (preview) continue;
       const base = existing || { name: t.name, enabled: false, order: listThemes().length + 1, prompts: {}, variantModels: {} };
       const st = t.settings; const yes = v => /^(yes|true|on|1)$/i.test(v); 
-      const th = Object.assign({}, base, { name: existing ? existing.name : t.name, prompts: Object.assign({}, base.prompts, t.prompts), variantModels: Object.assign({}, base.variantModels || {}) });
+      const startPrompts = replaceAll ? {} : base.prompts; const th = Object.assign({}, base, { name: existing ? existing.name : t.name, prompts: Object.assign({}, startPrompts, t.prompts), variantModels: Object.assign({}, base.variantModels || {}) });
+      if (replaceAll) for (const v of VARIANTS) if (!(v in th.prompts)) th.prompts[v] = '';
       if (st.model != null) th.model = st.model; if (st.quality != null) th.quality = st.quality; if (st.moderation != null) th.moderation = st.moderation; if (st.order != null && isFinite(+st.order)) th.order = +st.order; if (st.enabled != null) th.enabled = yes(st.enabled);
       for (const k of Object.keys(st)) { const m = k.match(/^(.+)\.(model|quality)$/); if (!m) continue; const v = variantFor(m[1]); if (!v) continue; th.variantModels[v] = Object.assign({}, th.variantModels[v] || {}, { [m[2]]: st[k] }); }
       writeTheme(slug, th);
