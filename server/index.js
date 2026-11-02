@@ -56,10 +56,12 @@ const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'sketchy';
 const OPENAI_KEY = process.env.OPENAI_API_KEY || '';
 const OPENAI_BASE = process.env.OPENAI_BASE || 'https://api.openai.com';
+const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || ''; const STRIPE_BASE = process.env.STRIPE_BASE || 'https://api.stripe.com';
+const PAY_TTL = 15 * 60000; // an unpaid sketch waits this long for its payment, then quietly expires
 
 // ---------- settings ----------
 const SETTINGS_FILE = path.join(DATA, 'settings.json');
-const DEFAULT_SETTINGS = { model: 'gpt-image-2-2026-04-21', quality: 'medium', size: '1024x1536', moderation: 'low', bots: 1, concurrency: 2, textModel: 'gpt-4.1-mini', foundations: [{ id: 'normal', name: 'Normal', text: '' }, { id: 'bighead', name: 'Big head', text: '' }], safetyFoundation: 'AGE SAFETY — APPLIES TO EVERY PERSON IN EVERY THEME. Never assume someone is an adult because of makeup, clothing, pose, body shape or hairstyle; when a subject could plausibly be under 18, use the age-safe treatment. Anyone who appears under 18 is drawn in cheerful, wholesome, fully covering, age-appropriate clothing and poses: costumes may be playful, adventurous or fantasy-themed, but never risqué fashion, lingerie or corset styling, exposed undergarments, cleavage-focused cuts, suggestive poses or expressions, adult-party motifs, alcohol, smoking or intimate contact. Keep their actual youthful features; never age them up. For adults who are clearly 18+, a theme MAY be as bold as pin-up, burlesque or boudoir: sultry, flirtatious, cheeky, risqué — but always non-explicit: no nudity, no visible underwear as underwear, intimate areas fully covered by opaque fabric, no sexual acts. Adult boldness is only ever a theme direction, never a default. When adults and minors appear together, apply each person\'s rules separately and keep the whole composition non-sexual; if a theme\'s adult styling conflicts with a minor, replace the styling with an age-safe costume, not an older face. These rules never override the drawing rules below.', eventMode: 'family', testModels: ['gpt-image-2-2026-04-21'], autoRun: true, pauseBetween: true, eventName: 'Sketchy Robotics', cameraZoom: 1.6 };
+const DEFAULT_SETTINGS = { model: 'gpt-image-2-2026-04-21', quality: 'medium', size: '1024x1536', moderation: 'low', bots: 1, concurrency: 2, textModel: 'gpt-4.1-mini', foundations: [{ id: 'normal', name: 'Normal', text: '' }, { id: 'bighead', name: 'Big head', text: '' }], safetyFoundation: 'AGE SAFETY — APPLIES TO EVERY PERSON IN EVERY THEME. Never assume someone is an adult because of makeup, clothing, pose, body shape or hairstyle; when a subject could plausibly be under 18, use the age-safe treatment. Anyone who appears under 18 is drawn in cheerful, wholesome, fully covering, age-appropriate clothing and poses: costumes may be playful, adventurous or fantasy-themed, but never risqué fashion, lingerie or corset styling, exposed undergarments, cleavage-focused cuts, suggestive poses or expressions, adult-party motifs, alcohol, smoking or intimate contact. Keep their actual youthful features; never age them up. For adults who are clearly 18+, a theme MAY be as bold as pin-up, burlesque or boudoir: sultry, flirtatious, cheeky, risqué — but always non-explicit: no nudity, no visible underwear as underwear, intimate areas fully covered by opaque fabric, no sexual acts. Adult boldness is only ever a theme direction, never a default. When adults and minors appear together, apply each person\'s rules separately and keep the whole composition non-sexual; if a theme\'s adult styling conflicts with a minor, replace the styling with an age-safe costume, not an older face. These rules never override the drawing rules below.', eventMode: 'family', testModels: ['gpt-image-2-2026-04-21'], autoRun: true, pauseBetween: true, eventName: 'Sketchy Robotics', cameraZoom: 1.6, pay: { enabled: false, sizes: [{ id: '4x6', label: '4 × 6 in', price: 500, enabled: true }, { id: '5x7', label: '5 × 7 in', price: 800, enabled: true }, { id: '8x10', label: '8 × 10 in', price: 1200, enabled: true }, { id: '8.5x11', label: '8.5 × 11 in', price: 1500, enabled: true }] } }; // pay.sizes[].price is in cents
 function getSettings() { try { return Object.assign({}, DEFAULT_SETTINGS, JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))); } catch (_) { return Object.assign({}, DEFAULT_SETTINGS); } }
 function saveSettings(s) { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2)); persist(SETTINGS_FILE); }
 
@@ -94,7 +96,25 @@ function loadState() {
   seq = Math.max(0, ...[...jobs.values()].map(j => j.number || 0));
 }
 function saveJob(j) { fs.mkdirSync(path.join(JOBS, j.id), { recursive: true }); const f = path.join(JOBS, j.id, 'job.json'); fs.writeFileSync(f, JSON.stringify(j, null, 2)); jobs.set(j.id, j); if (!j.test || j.lab) persist(f); }
-function publicJob(j) { const { id, number, status, theme, themeName, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset, names, bot } = j; return { id, number, status, theme, themeName, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset, names, bot }; }
+function publicJob(j) { const { id, number, status, theme, themeName, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset, names, bot, pay } = j; return { id, number, status, theme, themeName, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset, names, bot, pay: pay ? { size: pay.size, label: pay.label, amount: pay.amount, paidAt: pay.paidAt, method: pay.method } : null }; }
+// ---------- payments (Stripe Checkout: the iPad shows a QR, the guest pays on their own phone) ----------
+function cleanPay(p) { const sizes = Array.isArray(p.sizes) ? p.sizes : []; return { enabled: !!p.enabled, sizes: sizes.map(z => ({ id: String(z.id || '').replace(/[^0-9a-z.x]/gi, '').slice(0, 12), label: String(z.label || z.id || '').slice(0, 30), price: Math.max(0, Math.round(+z.price || 0)), enabled: z.enabled !== false })).filter(z => z.id) }; }
+const paySizes = () => ((getSettings().pay || {}).sizes || []).filter(z => z.enabled && z.price > 0);
+const payOn = () => !!(getSettings().pay || {}).enabled && paySizes().length > 0;
+const money = c => '$' + (c / 100).toFixed(2);
+function form(obj, prefix, out) { out = out || new URLSearchParams(); for (const [k, v] of Object.entries(obj)) { const key = prefix ? `${prefix}[${k}]` : k; if (v && typeof v === 'object') form(v, key, out); else if (v !== undefined && v !== null) out.append(key, String(v)); } return out; }
+async function stripe(method, p, params) { // tiny Stripe client: form-encoded over fetch, no SDK to install
+  if (!STRIPE_KEY) throw new Error('Stripe is not connected — add STRIPE_SECRET_KEY in Replit Secrets');
+  const r = await fetch(STRIPE_BASE + p, { method, headers: Object.assign({ authorization: 'Basic ' + Buffer.from(STRIPE_KEY + ':').toString('base64') }, method === 'POST' ? { 'content-type': 'application/x-www-form-urlencoded' } : {}), body: method === 'POST' ? form(params || {}).toString() : undefined });
+  const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error((d.error && d.error.message) || `Stripe ${r.status}`); return d;
+}
+function markPaid(j, method, amount) { if (j.status !== 'unpaid') return; j.pay = Object.assign(j.pay || {}, { paidAt: Date.now(), method, amount: amount != null ? amount : (j.pay && j.pay.amount) || 0 }); j.status = 'pending'; saveJob(j); pump(); }
+async function checkPaid(j) { // ask Stripe whether this sketch's checkout was paid (also what the webhook triggers)
+  if (j.status !== 'unpaid' || !j.pay || !j.pay.sessionId) return false; if (Date.now() - (j.pay.checkedAt || 0) < 2500) return false; j.pay.checkedAt = Date.now();
+  try { const ses = await stripe('GET', '/v1/checkout/sessions/' + j.pay.sessionId); if (ses.payment_status === 'paid') { markPaid(j, 'card', ses.amount_total); return true; } } catch (e) { console.error('stripe check', j.number, e.message); }
+  return false;
+}
+setInterval(() => { for (const j of jobs.values()) if (j.status === 'unpaid' && Date.now() - j.createdAt > PAY_TTL) { j.status = 'expired'; saveJob(j); if (j.pay && j.pay.sessionId) stripe('POST', `/v1/checkout/sessions/${j.pay.sessionId}/expire`).catch(() => {}); } }, 60000);
 const cleanName = v => String(v || '').replace(/[^\p{L}\p{N} .,'&-]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 24); // letters the plotter font has
 function sortedJobs() { return [...jobs.values()].sort((a, b) => (a.priority || 0) - (b.priority || 0) || a.createdAt - b.createdAt); }
 function queuePosition(id) { let n = 0; for (const j of sortedJobs()) { if (['pending', 'processing', 'ready', 'drawing'].includes(j.status)) { n++; if (j.id === id) return n; } } return null; }
@@ -165,6 +185,10 @@ setInterval(() => { for (const j of jobs.values()) if (j.status === 'drawing' &&
 
 // ---------- app ----------
 const app = express();
+app.post('/api/stripe/webhook', express.raw({ type: '*/*', limit: '1mb' }), (req, res) => { // optional speed-up: Stripe tells us a checkout completed; we confirm by asking Stripe, so the body is never trusted
+  try { const ev = JSON.parse(req.body.toString('utf8')); const id = ev.data && ev.data.object && (ev.data.object.client_reference_id || (ev.data.object.metadata || {}).job); const j = id && jobs.get(id); if (j) { if (j.pay) j.pay.checkedAt = 0; checkPaid(j); } } catch (_) {}
+  res.json({ received: true });
+});
 app.use(express.json({ limit: '2mb' }));
 app.disable('x-powered-by');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -206,7 +230,7 @@ app.post('/api/phone/:code/photo', upload.single('photo'), async (req, res) => {
 app.get('/api/phone/:code/photo', (req, res) => { const v = phoneCodes.get(req.params.code); if (!v || !v.photo) return res.status(404).end(); res.setHeader('content-type', 'image/jpeg'); res.setHeader('cache-control', 'no-store'); res.send(v.photo); });
 
 // ----- public (guest) -----
-app.get('/api/themes', (req, res) => res.json({ themes: listThemes().filter(t => t.enabled && t.rating === (getSettings().eventMode === 'adult' ? 'adult' : 'family')).map(t => ({ slug: t.slug, name: t.name, hasThumb: t.hasThumb, variants: VARIANTS.filter(v => t.prompts[v].trim()) })), variants: VARIANT_LABELS, event: getSettings().eventName, cameraZoom: getSettings().cameraZoom, bots: botCount() }));
+app.get('/api/themes', (req, res) => res.json({ themes: listThemes().filter(t => t.enabled && t.rating === (getSettings().eventMode === 'adult' ? 'adult' : 'family')).map(t => ({ slug: t.slug, name: t.name, hasThumb: t.hasThumb, variants: VARIANTS.filter(v => t.prompts[v].trim()) })), variants: VARIANT_LABELS, event: getSettings().eventName, cameraZoom: getSettings().cameraZoom, pay: payOn() ? { sizes: paySizes().map(z => ({ id: z.id, label: z.label, price: z.price, text: money(z.price) })) } : null, bots: botCount() }));
 app.get('/api/themes/:slug/thumb', (req, res) => { const f = path.join(THEMES, slugify(req.params.slug), 'thumb.png'); if (fs.existsSync(f)) res.sendFile(f); else res.status(404).end(); });
 app.post('/api/jobs', upload.single('photo'), async (req, res) => {
   try {
@@ -217,6 +241,7 @@ app.post('/api/jobs', upload.single('photo'), async (req, res) => {
     const id = crypto.randomBytes(6).toString('hex');
     const names = { a: cleanName(req.body.name1), b: cleanName(req.body.name2), pet: cleanName(req.body.petName) }; if (!names.a && !names.b && !names.pet) delete names.a;
     const job = { id, number: ++seq, status: 'pending', theme: theme.slug, themeName: theme.name, variant, createdAt: Date.now(), attempts: 0, guestName: String(req.body.name || '').slice(0, 60), names: (names.a || names.b || names.pet) ? names : null, priority: 0 };
+    if (payOn()) { job.status = 'unpaid'; job.pay = { size: null, label: null, amount: null, sessionId: null, url: null, paidAt: null, method: null }; } // waits on the pay screen until Stripe says it's paid
     fs.mkdirSync(path.join(JOBS, id), { recursive: true });
     // EXIF-rotate, limit size, save as jpg
     await sharp(req.file.buffer).rotate().resize(1536, 1536, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 92 }).toFile(path.join(JOBS, id, 'photo.jpg'));
@@ -224,12 +249,34 @@ app.post('/api/jobs', upload.single('photo'), async (req, res) => {
     res.json(Object.assign(publicJob(job), { position: queuePosition(id) }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.get('/api/jobs/:id', (req, res) => { const j = jobs.get(req.params.id); if (!j) return res.status(404).json({ error: 'not found' }); res.json(Object.assign(publicJob(j), { position: queuePosition(j.id) })); });
+app.get('/api/jobs/:id', async (req, res) => { const j = jobs.get(req.params.id); if (!j) return res.status(404).json({ error: 'not found' }); await checkPaid(j); res.json(Object.assign(publicJob(j), { position: queuePosition(j.id) })); });
+app.post('/api/jobs/:id/pay', async (req, res) => { // guest picked a size: open a Stripe Checkout for it and hand back the link (shown as a QR)
+  const j = jobs.get(req.params.id); if (!j) return res.status(404).json({ error: 'not found' }); if (j.status !== 'unpaid') return res.json(Object.assign(publicJob(j), { position: queuePosition(j.id) }));
+  const z = paySizes().find(z => z.id === String(req.body.size || '')); if (!z) return res.status(400).json({ error: 'pick a size' });
+  const base = (req.get('x-forwarded-proto') || req.protocol) + '://' + req.get('host');
+  try {
+    if (j.pay.sessionId && j.pay.size !== z.id) stripe('POST', `/v1/checkout/sessions/${j.pay.sessionId}/expire`).catch(() => {});
+    if (!j.pay.sessionId || j.pay.size !== z.id) {
+      const ses = await stripe('POST', '/v1/checkout/sessions', { mode: 'payment', line_items: [{ quantity: 1, price_data: { currency: 'usd', unit_amount: z.price, product_data: { name: `${getSettings().eventName || 'Sketchy Robotics'} — ${z.label} robot sketch` } } }],
+        success_url: `${base}/paid?ok=1`, cancel_url: `${base}/paid?cancel=1`, expires_at: Math.floor(Date.now() / 1000) + 31 * 60, metadata: { job: j.id, number: j.number, size: z.id }, client_reference_id: j.id });
+      j.pay = Object.assign(j.pay, { size: z.id, label: z.label, amount: z.price, sessionId: ses.id, url: ses.url }); saveJob(j);
+    }
+    res.json({ ok: true, url: j.pay.url, amount: j.pay.amount, size: z.id, label: z.label });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.post('/api/jobs/:id/cancel', (req, res) => { const j = jobs.get(req.params.id); if (j && j.status === 'unpaid') { j.status = 'expired'; saveJob(j); if (j.pay && j.pay.sessionId) stripe('POST', `/v1/checkout/sessions/${j.pay.sessionId}/expire`).catch(() => {}); } res.json({ ok: true }); }); // guest walked away before paying
+app.get('/api/jobs/:id/pay/qr.svg', async (req, res) => { const j = jobs.get(req.params.id); if (!j || !j.pay || !j.pay.url) return res.status(404).end(); try { const svg = await require('qrcode').toString(j.pay.url, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }); res.setHeader('content-type', 'image/svg+xml'); res.setHeader('cache-control', 'no-store'); res.send(svg); } catch (e) { res.status(500).end(); } });
+app.get('/paid', (req, res) => res.sendFile(path.join(ROOT, 'public', 'paid', 'index.html')));
+app.get('/api/admin/stripe', adminAuth, async (req, res) => { // is Stripe connected, and to which account
+  if (!STRIPE_KEY) return res.json({ configured: false });
+  try { const a = await stripe('GET', '/v1/account'); res.json({ configured: true, mode: STRIPE_KEY.startsWith('sk_test') ? 'test' : 'live', name: (a.business_profile && a.business_profile.name) || a.settings && a.settings.dashboard && a.settings.dashboard.display_name || a.email || a.id, email: a.email || '' }); }
+  catch (e) { res.json({ configured: true, mode: STRIPE_KEY.startsWith('sk_test') ? 'test' : 'live', error: e.message }); }
+});
 app.get('/api/jobs/:id/art', async (req, res) => { const f = path.join(JOBS, req.params.id, req.query.thumb ? 'art-thumb.png' : 'art.png'); if (!(await ensureLocal(f))) return res.status(404).end();
   if (req.query.download) { const j = jobs.get(req.params.id) || {}; res.setHeader('content-disposition', `attachment; filename="sketch-${String(j.number || 0).padStart(3, '0')}-${slugify(j.themeName || 'theme')}.png"`); } res.sendFile(f); });
 
 // ----- operator (studio) — unauthenticated on purpose: it only reads art and reports progress; the laptop is yours -----
-app.get('/api/queue', (req, res) => { res.json({ settings: getSettings(), bots: botList(), jobs: sortedJobs().filter(j => !j.test && !['done', 'skipped', 'archived'].includes(j.status)).map(publicJob), done: sortedJobs().filter(j => j.status === 'done').slice(-10).map(publicJob) }); });
+app.get('/api/queue', (req, res) => { res.json({ settings: getSettings(), bots: botList(), jobs: sortedJobs().filter(j => !j.test && !['done', 'skipped', 'archived', 'unpaid', 'expired'].includes(j.status)).map(publicJob), done: sortedJobs().filter(j => j.status === 'done').slice(-10).map(publicJob) }); });
 app.post('/api/queue/claim', (req, res) => { // next ready -> drawing. Mine first, then unassigned, then jobs whose robot has gone quiet
   const bot = Math.max(1, +(req.body && req.body.bot) || 1); const ready = sortedJobs().filter(j => j.status === 'ready');
   const j = ready.find(j => j.bot === bot) || ready.find(j => !j.bot || j.bot > botCount()) || ready.find(j => botStale(j.bot)); if (!j) return res.json({ job: null });
@@ -246,7 +293,7 @@ app.post('/api/jobs/:id/status', (req, res) => { const j = jobs.get(req.params.i
 // ----- admin -----
 app.post('/api/admin/login', (req, res) => { if ((req.body.password || '') === ADMIN_PASSWORD) res.json({ ok: true, token: ADMIN_PASSWORD }); else res.status(401).json({ error: 'wrong password' }); });
 app.get('/api/admin/state', adminAuth, (req, res) => res.json({ settings: getSettings(), themes: listThemes(), variants: VARIANT_LABELS, variantOrder: VARIANTS, jobs: sortedJobs().filter(j => !j.test).slice(-200).map(j => Object.assign(publicJob(j), { guestName: j.guestName, priority: j.priority })), hasKey: !!OPENAI_KEY, durable: !!bucket, readOnly: !!bucket && !IS_DEPLOYMENT }));
-app.post('/api/admin/settings', adminAuth, (req, res) => { const body = req.body || {}; const allowed = ['model', 'quality', 'size', 'moderation', 'concurrency', 'eventName', 'cameraZoom', 'bots', 'textModel', 'foundations', 'safetyFoundation', 'eventMode', 'testModels']; const s = getSettings(); for (const k of allowed) if (k in body) s[k] = body[k]; saveSettings(s); res.json(Object.assign({ ok: true, durable: !!bucket && IS_DEPLOYMENT }, s)); });
+app.post('/api/admin/settings', adminAuth, (req, res) => { const body = req.body || {}; const allowed = ['model', 'quality', 'size', 'moderation', 'concurrency', 'eventName', 'cameraZoom', 'bots', 'textModel', 'foundations', 'safetyFoundation', 'eventMode', 'testModels', 'pay']; const s = getSettings(); for (const k of allowed) if (k in body) s[k] = body[k]; if (body.pay) s.pay = cleanPay(body.pay); saveSettings(s); res.json(Object.assign({ ok: true, durable: !!bucket && IS_DEPLOYMENT }, s)); });
 app.post('/api/admin/themes', adminAuth, (req, res) => { const name = String(req.body.name || '').trim(); if (!name) return res.status(400).json({ error: 'name required' }); let slug = slugify(name); if (readTheme(slug)) slug += '-' + Date.now().toString(36); writeTheme(slug, { name, enabled: true, order: listThemes().length + 1, prompts: {} }); res.json(readTheme(slug)); });
 app.put('/api/admin/themes/:slug', adminAuth, (req, res) => { const t = readTheme(slugify(req.params.slug)); if (!t) return res.status(404).end(); writeTheme(t.slug, Object.assign(t, req.body, { prompts: Object.assign(t.prompts, req.body.prompts || {}), variantModels: Object.assign(t.variantModels, req.body.variantModels || {}) })); res.json(readTheme(t.slug)); });
 app.delete('/api/admin/themes/:slug', adminAuth, (req, res) => { const d = path.join(THEMES, slugify(req.params.slug)); if (fs.existsSync(d)) { fs.rmSync(d, { recursive: true }); unpersist(d); } res.json({ ok: true }); });
@@ -451,6 +498,7 @@ app.post('/api/admin/jobs/:id', adminAuth, (req, res) => { // actions: retry, fr
   else if (a === 'front') { j.priority = -Date.now(); }
   else if (a === 'skip') { j.status = 'skipped'; }
   else if (a === 'archive') { j.status = 'archived'; } // out of every list, photo + art kept
+  else if (a === 'paid') { const z = paySizes().find(z => z.id === req.body.size) || (j.pay && j.pay.size && { id: j.pay.size, label: j.pay.label, price: j.pay.amount }); if (j.status === 'expired') j.status = 'unpaid'; if (!j.pay) j.pay = {}; if (z) Object.assign(j.pay, { size: z.id, label: z.label, amount: z.price }); if (j.pay.sessionId) { stripe('POST', `/v1/checkout/sessions/${j.pay.sessionId}/expire`).catch(() => {}); j.pay.sessionId = null; j.pay.url = null; } markPaid(j, String(req.body.method || 'cash').slice(0, 12), z ? z.price : 0); return res.json(publicJob(j)); }
   else if (a === 'assign') { j.bot = Math.max(0, Math.min(8, +req.body.bot || 0)) || null; } // move a sketch to another robot (0 = whichever is free)
   else if (a === 'requeue') { j.status = (j.readyAt || fs.existsSync(path.join(JOBS, j.id, 'art.png'))) ? 'ready' : 'pending'; if (j.status === 'ready') assignBot(j); }
   else if (a === 'delete') { jobs.delete(j.id); fs.rmSync(path.join(JOBS, j.id), { recursive: true, force: true }); unpersist(path.join(JOBS, j.id)); return res.json({ ok: true }); }
@@ -469,16 +517,16 @@ app.get('/api/admin/drawlog.csv', adminAuth, (req, res) => { // every drawing th
   try { fmtD = new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }); fmtT = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }); }
   catch (_) { fmtD = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' }); fmtT = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }); }
   const mmss = sec => sec ? `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}` : '';
-  const rows = []; let total = 0, measured = 0, timed = 0;
+  const rows = []; let total = 0, measured = 0, timed = 0, revenue = 0, paidN = 0;
   for (const j of sortedJobs().filter(j => j.doneAt && !j.test)) {
     // draw_seconds is the arm's measured time (logged since the draw-time feature); older rows fall back to claim→done, which includes conversion/preview
     const sec = j.drawSeconds || (j.drawStartedAt && j.doneAt > j.drawStartedAt ? Math.round((j.doneAt - j.drawStartedAt) / 10) / 100 : 0); const src = j.drawSeconds ? 'measured' : sec ? 'claim-to-done' : '';
-    if (sec) { total += sec; timed++; if (j.drawSeconds) measured++; }
-    rows.push([j.number, j.themeName, VARIANT_LABELS[j.variant] || j.variant, fmtD.format(j.createdAt), fmtT.format(j.createdAt), fmtD.format(j.doneAt), fmtT.format(j.doneAt), j.widthMm ? (j.widthMm / 25.4).toFixed(2) : '', j.strokes || '', sec || '', mmss(sec), src, j.preset || '', j.status]);
+    if (sec) { total += sec; timed++; if (j.drawSeconds) measured++; } const pay = j.pay || {}; if (pay.paidAt && pay.amount) { revenue += pay.amount; paidN++; }
+    rows.push([j.number, j.themeName, VARIANT_LABELS[j.variant] || j.variant, fmtD.format(j.createdAt), fmtT.format(j.createdAt), fmtD.format(j.doneAt), fmtT.format(j.doneAt), j.widthMm ? (j.widthMm / 25.4).toFixed(2) : '', j.strokes || '', sec || '', mmss(sec), src, j.preset || '', j.status, pay.label || pay.size || '', pay.amount ? (pay.amount / 100).toFixed(2) : '', pay.method || '']);
   }
   const esc = v => /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
-  const lines = ['number,theme,variant,photo_date,photo_time,drawn_date,drawn_time,width_in,strokes,draw_seconds,draw_mm_ss,time_source,speed_preset,status', ...rows.map(r => r.map(esc).join(','))];
-  lines.push('', `TOTAL,${rows.length} drawings,,,,,,,,${Math.round(total * 10) / 10},${mmss(total)},${timed} timed (${measured} measured),,`);
+  const lines = ['number,theme,variant,photo_date,photo_time,drawn_date,drawn_time,width_in,strokes,draw_seconds,draw_mm_ss,time_source,speed_preset,status,size,paid_usd,paid_by', ...rows.map(r => r.map(esc).join(','))];
+  lines.push('', `TOTAL,${rows.length} drawings,,,,,,,,${Math.round(total * 10) / 10},${mmss(total)},${timed} timed (${measured} measured),,,,${(revenue / 100).toFixed(2)},${paidN} paid`);
   if (timed) lines.push(`AVERAGE,,,,,,,,,${Math.round(total / timed * 10) / 10},${mmss(total / timed)},per timed drawing,,`);
   res.setHeader('content-type', 'text/csv'); res.setHeader('content-disposition', 'attachment; filename="sketchy-draw-log.csv"');
   res.send(lines.join('\n'));

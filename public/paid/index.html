@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" type="image/png" href="/favicon.png">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Sketchy Robotics</title>
+<style>
+  :root{--blue:#006df6;--ink:#0a0a0a;--mut:#5b6474;--bg:#f3f5f8}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:18px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  main{max-width:520px;margin:0 auto;padding:60px 22px;text-align:center;display:flex;flex-direction:column;gap:14px;align-items:center}
+  .big{font-size:44px;font-weight:900;margin:0}
+  .ok{color:#1a9c4c}.no{color:#b51f33}
+  p{margin:0;color:var(--mut)}
+</style>
+</head>
+<body>
+<main>
+  <div id="ok" style="display:none"><h1 class="big ok">Paid ✓</h1><p>Thank you! Look at the iPad — your sketch is on its way. You can close this page.</p></div>
+  <div id="no" style="display:none"><h1 class="big no">Not paid</h1><p>No charge was made. Scan the code on the iPad again if you'd like to pay.</p></div>
+</main>
+<script>document.getElementById(location.search.includes('ok=1') ? 'ok' : 'no').style.display = '';</script>
+</body>
+</html>

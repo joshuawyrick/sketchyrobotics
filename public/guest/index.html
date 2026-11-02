@@ -92,6 +92,8 @@
   .status{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:12px}
   .big{font-size:96px;font-weight:800;color:var(--blue);line-height:1}
   .art{max-height:52vh;max-width:100%;border:1px solid var(--line);border-radius:12px;background:#fff}
+  .sizes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;width:min(92%,560px)}.sizeBtn{border:3px solid var(--line);border-radius:18px;background:#fff;padding:22px 10px;font:800 26px system-ui;color:var(--ink);cursor:pointer}.sizeBtn small{display:block;font:700 22px system-ui;color:var(--blue);margin-top:6px}
+  .payQR{width:min(60vw,340px);aspect-ratio:1;background:#fff;border-radius:18px;padding:10px;border:3px solid var(--line)}.payQR img{width:100%;height:100%;display:block}.payPrice{font:900 34px system-ui;color:var(--blue)}.lnk{background:none;border:0;color:var(--mut);font:600 18px system-ui;text-decoration:underline;cursor:pointer}
   .spin{width:54px;height:54px;border:6px solid #dbe5f5;border-top-color:var(--blue);border-radius:50%;animation:r 1s linear infinite}
   @keyframes r{to{transform:rotate(360deg)}}
   .err{background:#fde8eb;color:#8f1d2b;border:1px solid #f3b4bd;padding:12px 16px;border-radius:12px}
@@ -171,7 +173,7 @@
 
   async function loadThemes() {
     const r = await fetch('/api/themes').then(r => r.json());
-    S.themes = r.themes; $('evName').textContent = r.event || ''; S.zoom = +r.cameraZoom || 1.6; S.bots = +r.bots || 1; document.documentElement.style.setProperty('--zoom', S.zoom);
+    S.themes = r.themes; S.pay = r.pay || null; $('evName').textContent = r.event || ''; S.zoom = +r.cameraZoom || 1.6; S.bots = +r.bots || 1; document.documentElement.style.setProperty('--zoom', S.zoom);
     const box = $('tiles'); box.innerHTML = '';
     if (!r.themes.length) box.innerHTML = '<p class="sub">No styles are set up yet. Add one in Admin.</p>';
     for (const t of r.themes) {
@@ -299,6 +301,9 @@
     const st = $('status'); const j = S.job;
     const r = await fetch('/api/jobs/' + j.id).then(r => r.json()).catch(() => null); if (!r) return setTimeout(poll, 3000);
     S.job = r;
+    if (r.status === 'unpaid') { renderPay(r); S.pollTimer = setTimeout(poll, 2500); return; }
+    if (r.status === 'expired') { st.innerHTML = `<div class="err">That one timed out before it was paid.<br><small>Tap "Next person" and start again if you'd still like a sketch.</small></div><p class="sub" id="cd"></p>`; startCountdown(15); return; }
+    if (S.payShown) { S.payShown = false; st.innerHTML = ''; }
     if (r.status === 'pending' || r.status === 'processing') { st.innerHTML = `<div class="spin"></div><h1>Drawing your sketch…</h1><p class="sub">You're <b>#${r.position || '?'}</b> in line. This takes about a minute.</p>`; S.pollTimer = setTimeout(poll, 2500); return; }
     if (r.status === 'failed') { st.innerHTML = `<div class="err">Sorry — that one didn't work. Please try again.<br><small>${r.error || ''}</small></div><p class="sub" id="cd"></p>`; startCountdown(15); return; }
     const multi = (S.bots || 1) > 1, where = r.bot ? `<span class="botTag">ROBOT ${r.bot}</span>` : '';
@@ -309,8 +314,23 @@
     if (!S.cdTimer) startCountdown(RESET_AFTER_ART); else { const el = $('cd'); if (el) el.textContent = S.cdText || ''; }
     if (r.status !== 'done') S.pollTimer = setTimeout(poll, 4000);
   }
-  const RESET_AFTER_ART = 20, IDLE_RESET = 90; // seconds
-  function goHome() { clearTimeout(S.pollTimer); clearInterval(S.cdTimer); S.cdTimer = null; S.cdText = ''; closeCam(); S.theme = null; S.job = null; S.who = null; S.g = {}; S.names = {}; loadThemes(); show('s-theme'); }
+  const RESET_AFTER_ART = 20, IDLE_RESET = 90, PAY_IDLE = 240; // seconds
+  function renderPay(r) { // pick a size, then a QR to Stripe Checkout; the server flips the job to pending when Stripe says it's paid
+    const st = $('status'); const sizes = (S.pay && S.pay.sizes) || [];
+    if (!S.payShown) { S.payShown = true; S.paySize = null; clearTimeout(S.payIdle); S.payIdle = setTimeout(goHome, PAY_IDLE * 1000); }
+    if (!r.pay || !r.pay.size) { if (st.dataset.v === 'sizes') return; st.dataset.v = 'sizes';
+      if (sizes.length === 1 && !S.paySize) { choose(sizes[0].id); return; }
+      st.innerHTML = `<h1>Pick your size</h1><p class="sub">How big should your sketch be?</p><div class="sizes">${sizes.map(z => `<button class="sizeBtn" data-size="${z.id}">${z.label}<small>${z.text}</small></button>`).join('')}</div>`;
+      st.querySelectorAll('[data-size]').forEach(b => b.onclick = () => choose(b.dataset.size)); return; }
+    if (st.dataset.v === 'qr:' + r.pay.size) return; st.dataset.v = 'qr:' + r.pay.size;
+    st.innerHTML = `<h1>Scan to pay</h1><div class="payPrice">${money(r.pay.amount)} · ${r.pay.label}</div><div class="payQR"><img src="/api/jobs/${r.id}/pay/qr.svg?v=${Date.now()}" alt="QR code"></div><p class="sub">Point your phone's camera at the code — Apple Pay, Google Pay or any card.<br>The robot starts the moment it goes through.</p>${sizes.length > 1 ? `<button class="lnk" id="resize">Change size</button>` : ''}`;
+    const rs = $('resize'); if (rs) rs.onclick = () => { S.paySize = null; st.dataset.v = ''; S.job.pay = null; renderPay(S.job); };
+    async function choose(id) { S.paySize = id; st.dataset.v = 'wait'; st.innerHTML = `<div class="spin"></div><h1>One moment…</h1>`;
+      try { const q = await fetch('/api/jobs/' + r.id + '/pay', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ size: id }) }); const d = await q.json(); if (!q.ok) throw new Error(d.error || q.status); S.job.pay = { size: d.size, label: d.label, amount: d.amount }; st.dataset.v = ''; renderPay(S.job); }
+      catch (e) { st.dataset.v = ''; st.innerHTML = `<div class="err">Payment isn't available right now.<br><small>${e.message}</small></div><p class="sub">Please ask the operator.</p>`; } }
+  }
+  const money = c => '$' + (c / 100).toFixed(2).replace(/\.00$/, '');
+  function goHome() { clearTimeout(S.payIdle); if (S.job && S.job.status === 'unpaid') fetch('/api/jobs/' + S.job.id + '/cancel', { method: 'POST' }).catch(() => {}); S.payShown = false; const st = $('status'); if (st) st.dataset.v = ''; clearTimeout(S.pollTimer); clearInterval(S.cdTimer); S.cdTimer = null; S.cdText = ''; closeCam(); S.theme = null; S.job = null; S.who = null; S.g = {}; S.names = {}; loadThemes(); show('s-theme'); }
   function startCountdown(secs) {
     clearInterval(S.cdTimer); let left = secs; const tick = () => { S.cdText = `Next person in ${left} s — tap to stay`; const el = $('cd'); if (el) el.textContent = S.cdText; if (left-- <= 0) goHome(); };
     tick(); S.cdTimer = setInterval(tick, 1000);
