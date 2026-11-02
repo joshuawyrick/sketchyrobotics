@@ -28,6 +28,18 @@ async def main():
         print('winners:', len(await pg.query_selector_all('#bGrid .cell.win')), '| thumb marked:', len(await pg.query_selector_all('#bGrid .cell.thumb')))
         await pg.click('#bPublish'); await pg.wait_for_timeout(1500); print('publish:', await pg.text_content('#bPubMsg'))
         ths = api('/api/admin/state')['themes']; t = [x for x in ths if x['name']=='Rockstar'][0]; print('theme:', t['name'], t['rating'], t['proportions'], '| prompts:', sum(1 for v in t['prompts'].values() if v.strip()), '| vm:', t['variantModels'], '| thumb:', t['hasThumb'], '| enabled:', t['enabled'])
+        # spice check on the adult flavour: fake refuses, dial back, re-check passes
+        await pg.select_option('#bFlavor', 'adult-normal'); await pg.wait_for_timeout(400); await pg.click('#bCheck')
+        for i in range(60):
+            await pg.wait_for_timeout(500)
+            if 'accepted' in (await pg.text_content('#bCheckMsg')): break
+        print('check:', await pg.text_content('#bCheckMsg'), '| dial buttons:', len(await pg.query_selector_all('#bPrompts button[data-dial]')))
+        await (await pg.query_selector('#bPrompts button[data-dial]')).click(); await pg.wait_for_timeout(1200); print('after dial:', 'tamer' in (await pg.input_value('#bPrompts textarea[data-v="1-male"]')), '| dial buttons now:', len(await pg.query_selector_all('#bPrompts button[data-dial]')))
+        await pg.click('#bCheck')
+        for i in range(60):
+            await pg.wait_for_timeout(500)
+            if 'accepted' in (await pg.text_content('#bCheckMsg')): break
+        print('re-check:', await pg.text_content('#bCheckMsg'))
         # publish the adult flavour too, then check the iPad list respects the mode
         await pg.select_option('#bFlavor', 'adult-normal'); await pg.wait_for_timeout(400); await pg.click('#bPublish'); await pg.wait_for_timeout(1500); print('publish 2:', await pg.text_content('#bPubMsg'))
         names = lambda: [t['name'] for t in json.load(urllib.request.urlopen(B+'/api/themes'))['themes']]

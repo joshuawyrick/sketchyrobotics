@@ -58,7 +58,7 @@ const OPENAI_BASE = process.env.OPENAI_BASE || 'https://api.openai.com';
 
 // ---------- settings ----------
 const SETTINGS_FILE = path.join(DATA, 'settings.json');
-const DEFAULT_SETTINGS = { model: 'gpt-image-2-2026-04-21', quality: 'medium', size: '1024x1536', moderation: 'low', bots: 1, concurrency: 2, textModel: 'gpt-4.1-mini', foundations: [{ id: 'normal', name: 'Normal', text: '' }, { id: 'bighead', name: 'Big head', text: '' }], safetyFoundation: 'If the person in the photo appears to be under 18, draw them fully clothed in age-appropriate attire with a neutral, friendly pose and expression, regardless of the theme. Never suggestive, never revealing.', eventMode: 'family', testModels: ['gpt-image-2-2026-04-21'], autoRun: true, pauseBetween: true, eventName: 'Sketchy Robotics', cameraZoom: 1.6 };
+const DEFAULT_SETTINGS = { model: 'gpt-image-2-2026-04-21', quality: 'medium', size: '1024x1536', moderation: 'low', bots: 1, concurrency: 2, textModel: 'gpt-4.1-mini', foundations: [{ id: 'normal', name: 'Normal', text: '' }, { id: 'bighead', name: 'Big head', text: '' }], safetyFoundation: 'AGE SAFETY — APPLIES TO EVERY PERSON IN EVERY THEME. Never assume someone is an adult because of makeup, clothing, pose, body shape or hairstyle; when a subject could plausibly be under 18, use the age-safe treatment. Anyone who appears under 18 is drawn in cheerful, wholesome, fully covering, age-appropriate clothing and poses: costumes may be playful, adventurous or fantasy-themed, but never risqué fashion, lingerie or corset styling, exposed undergarments, cleavage-focused cuts, suggestive poses or expressions, adult-party motifs, alcohol, smoking or intimate contact. Keep their actual youthful features; never age them up. For adults who are clearly 18+, a theme MAY be as bold as pin-up, burlesque or boudoir: sultry, flirtatious, cheeky, risqué — but always non-explicit: no nudity, no visible underwear as underwear, intimate areas fully covered by opaque fabric, no sexual acts. Adult boldness is only ever a theme direction, never a default. When adults and minors appear together, apply each person\'s rules separately and keep the whole composition non-sexual; if a theme\'s adult styling conflicts with a minor, replace the styling with an age-safe costume, not an older face. These rules never override the drawing rules below.', eventMode: 'family', testModels: ['gpt-image-2-2026-04-21'], autoRun: true, pauseBetween: true, eventName: 'Sketchy Robotics', cameraZoom: 1.6 };
 function getSettings() { try { return Object.assign({}, DEFAULT_SETTINGS, JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))); } catch (_) { return Object.assign({}, DEFAULT_SETTINGS); } }
 function saveSettings(s) { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2)); persist(SETTINGS_FILE); }
 
@@ -266,7 +266,8 @@ const WRITER_SYSTEM = `You write prompts for an AI image-editing model that turn
 You are given a FOUNDATION: fixed, non-negotiable instructions that will be placed verbatim at the top of the final prompt. Do NOT repeat, paraphrase, weaken or contradict anything in it.
 Your job is to write only the THEME SECTION that follows it: the costume/outfit, props, hair/accessory treatment, pose and positioning, expression, body details and setting for the requested combination of people, based on the operator's description. Match the foundation's tone and level of detail. Be concrete and visual (what is worn, held, where things are), avoid vague adjectives, keep it to one tightly written paragraph or a short list of sentences, and never mention text, logos, watermarks, colours or shading (the output must stay clean line art). Respect the combination exactly: for two people say who is on the LEFT and who is on the RIGHT; for person + pet describe the pet's treatment too.
 Output ONLY the theme section text, no heading, no preamble, no quotes.
-AUDIENCE RULES: when the audience is FAMILY, everything must be wholesome and suitable for children: fully clothed, no innuendo, no weapons pointed at people, no gore, no alcohol or drugs. When the audience is ADULT, the theme may be edgy, flirtatious, risqué or exotic in costume and attitude (within what a general-audience image service will render: no nudity, no explicit content).`;
+AUDIENCE RULES: when the audience is FAMILY, everything must be wholesome and suitable for children: fully clothed, no innuendo, no weapons pointed at people, no gore, no alcohol or drugs. When the audience is ADULT, go as bold as a general-audience image service will render: pin-up, burlesque, boudoir and rock-and-roll excess — sultry gaze, confident sexy poses, lingerie-styled or corset costumes, fishnets, heels, suggestive props and attitude — while keeping intimate areas opaquely covered and showing no sexual acts, because anything past that is refused by the service and the guest gets nothing. Adults only; never apply adult styling to anyone who could be under 18.
+When asked to DIAL BACK a prompt, keep the theme and the costume idea but move one clear step tamer: more fabric, less skin, suggestion instead of display, a cooler pose — the smallest change likely to make the image service accept it.`;
 app.post('/api/admin/writer', adminAuth, async (req, res) => {
   try {
     if (!OPENAI_KEY) throw new Error('OPENAI_API_KEY is not set'); const st = getSettings(); const model = String(req.body.model || st.textModel || 'gpt-4.1-mini');
@@ -368,6 +369,32 @@ app.post('/api/admin/builder/test', adminAuth, async (req, res) => { // generate
       try { await generateArt(job, override); job.status = 'test'; job.readyAt = Date.now(); } catch (e) { job.status = 'failed'; job.error = String(e.message || e); }
       job.seconds = Math.round((Date.now() - t0) / 1000); saveJob(job); return Object.assign(labJob(job), { flavor: fl }); }));
     res.json({ ok: true, results });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/admin/builder/check', adminAuth, async (req, res) => { // cheap pass/refuse check: one model, low quality, one image per combination of one flavour
+  try { const d = getDraft(); const st = getSettings(); const fl = String(req.body.flavor || flavorsOf(d)[0]); const [rating] = fl.split('-'); const model = String(req.body.model || (st.testModels || [])[0] || st.model);
+    const variants = (req.body.variants && req.body.variants.length ? req.body.variants : VARIANTS).filter(v => VARIANTS.includes(v) && d.prompts && d.prompts[fl] && d.prompts[fl][v]);
+    if (!variants.length) return res.status(400).json({ error: 'no prompts to check' });
+    const scratchSlug = '_builder'; if (!readTheme(scratchSlug)) writeTheme(scratchSlug, { name: 'Theme Builder (scratch)', enabled: false, order: 999, prompts: {} });
+    // a stand-in face when the slot has no reference: any library face, else any lab photo
+    let fallback = null; const lib = listRefs(); if (lib.length) fallback = await refBuffer(lib[0].id);
+    const results = await Promise.all(variants.map(async v => { const photo = (d.refs && d.refs[v] ? await refBuffer(d.refs[v]) : null) || fallback; if (!photo) return { v, label: VARIANT_LABELS[v], error: 'add at least one face to the library first' };
+      const id = 'lab-' + crypto.randomBytes(4).toString('hex'); const job = { id, number: 0, status: 'processing', theme: scratchSlug, themeName: d.name || 'draft', variant: v, createdAt: Date.now(), attempts: 1, test: true, lab: true, builder: true, check: true, flavor: fl, labPrompt: d.prompts[fl][v], labModel: model };
+      fs.mkdirSync(path.join(JOBS, id), { recursive: true }); fs.writeFileSync(path.join(JOBS, id, 'photo.jpg'), photo); jobs.set(id, job); const t0 = Date.now();
+      try { await generateArt(job, { model, prompt: d.prompts[fl][v], quality: 'low', moderation: rating === 'adult' ? 'low' : 'auto' }); job.status = 'test'; job.readyAt = Date.now(); } catch (e) { job.status = 'failed'; job.error = String(e.message || e); }
+      job.seconds = Math.round((Date.now() - t0) / 1000); saveJob(job); const refused = job.status === 'failed' && /safety|moderation|policy|rejected|not allowed|content/i.test(job.error || '');
+      return { v, label: VARIANT_LABELS[v], ok: job.status === 'test', refused, error: job.error, art: job.status === 'test' ? `/api/jobs/${id}/art` : null, seconds: job.seconds }; }));
+    const d2 = getDraft(); d2.checks = d2.checks || {}; d2.checks[fl] = Object.assign(d2.checks[fl] || {}, Object.fromEntries(results.map(r => [r.v, { ok: !!r.ok, refused: !!r.refused, error: r.error || null, art: r.art || null, at: Date.now() }]))); saveDraft(d2);
+    res.json({ ok: true, model, results, checks: d2.checks });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/admin/builder/dialback', adminAuth, async (req, res) => { // rewrite one prompt a step tamer, keeping foundation + safety verbatim
+  try { const d = getDraft(); const st = getSettings(); const fl = String(req.body.flavor || ''); const v = String(req.body.variant || ''); const cur = d.prompts && d.prompts[fl] && d.prompts[fl][v]; if (!cur) return res.status(400).json({ error: 'no prompt' });
+    const [rating, prop] = fl.split('-'); const f = (st.foundations || []).find(x => x.id === prop) || { text: '' }; const head = [st.safetyFoundation, f.text].map(x => (x || '').trim()).filter(Boolean).join('\n\n');
+    const themePart = head && cur.startsWith(head) ? cur.slice(head.length).trim() : cur; const model = String(req.body.model || st.textModel || 'gpt-4.1-mini');
+    const user = `FOUNDATION (already in the prompt, do not repeat):\n${head || '(none)'}\n\nAUDIENCE: ${rating.toUpperCase()}\nCOMBINATION: ${VARIANT_LABELS[v]}\nTHE IMAGE SERVICE REFUSED THIS THEME SECTION${req.body.reason ? ' (' + String(req.body.reason).slice(0, 200) + ')' : ''}:\n${themePart}\n\nDIAL BACK one step and output only the revised theme section.`;
+    const part = await chat(model, WRITER_SYSTEM, user, 900); const next = (head ? head + '\n\n' : '') + part; d.prompts[fl][v] = next; d.checks = d.checks || {}; if (d.checks[fl]) delete d.checks[fl][v]; saveDraft(d);
+    res.json({ ok: true, prompt: next });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/admin/builder/publish', adminAuth, async (req, res) => { // one flavour → a new theme or an existing one
