@@ -93,7 +93,7 @@
   .big{font-size:96px;font-weight:800;color:var(--blue);line-height:1}
   .art{max-height:52vh;max-width:100%;border:1px solid var(--line);border-radius:12px;background:#fff}
   .sizes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;width:min(92%,560px)}.sizeBtn{border:3px solid var(--line);border-radius:18px;background:#fff;padding:22px 10px;font:800 26px system-ui;color:var(--ink);cursor:pointer}.sizeBtn small{display:block;font:700 22px system-ui;color:var(--blue);margin-top:6px}
-  .payQR{width:min(60vw,340px);aspect-ratio:1;background:#fff;border-radius:18px;padding:10px;border:3px solid var(--line)}.payQR img{width:100%;height:100%;display:block}.payPrice{font:900 34px system-ui;color:var(--blue)}.lnk{background:none;border:0;color:var(--mut);font:600 18px system-ui;text-decoration:underline;cursor:pointer}
+  .btn.big{font-size:30px;padding:22px 34px;margin-top:10px}.payQR{width:min(60vw,340px);aspect-ratio:1;background:#fff;border-radius:18px;padding:10px;border:3px solid var(--line)}.payQR img{width:100%;height:100%;display:block}.payPrice{font:900 34px system-ui;color:var(--blue)}.lnk{background:none;border:0;color:var(--mut);font:600 18px system-ui;text-decoration:underline;cursor:pointer}
   .spin{width:54px;height:54px;border:6px solid #dbe5f5;border-top-color:var(--blue);border-radius:50%;animation:r 1s linear infinite}
   @keyframes r{to{transform:rotate(360deg)}}
   .err{background:#fde8eb;color:#8f1d2b;border:1px solid #f3b4bd;padding:12px 16px;border-radius:12px}
@@ -176,6 +176,7 @@
 
   async function loadThemes() {
     const r = await fetch('/api/themes').then(r => r.json());
+    if (S.build && r.build && r.build !== S.build && $('s-theme').classList.contains('on')) { location.reload(); return; } S.build = r.build || S.build; // server was updated: pick up the new page while idle
     S.themes = r.themes; S.pay = r.pay || null; $('evName').textContent = r.event || ''; S.zoom = +r.cameraZoom || 1.6; S.bots = +r.bots || 1; document.documentElement.style.setProperty('--zoom', S.zoom);
     const box = $('tiles'); box.innerHTML = '';
     if (!r.themes.length) box.innerHTML = '<p class="sub">No styles are set up yet. Add one in Admin.</p>';
@@ -310,6 +311,13 @@
     if (r.status === 'pending' || r.status === 'processing') { st.innerHTML = `<div class="spin"></div><h1>Drawing your sketch…</h1><p class="sub">You're <b>#${r.position || '?'}</b> in line. This takes about a minute.</p>`; S.pollTimer = setTimeout(poll, 2500); return; }
     if (r.status === 'failed') { st.innerHTML = `<div class="err">Sorry — that one didn't work. Please try again.<br><small>${r.error || ''}</small></div><p class="sub" id="cd"></p>`; startCountdown(15); return; }
     const multi = (S.bots || 1) > 1, where = r.bot ? `<span class="botTag">ROBOT ${r.bot}</span>` : '';
+    if (r.unmanned && r.paper && (r.status === 'done' ? r.paper.mine : r.status === 'ready')) { // unmanned event: a guest swaps the paper and releases the robot
+      const key = 'paper:' + r.status + ':' + r.paper.number; if (st.dataset.v !== key) { st.dataset.v = key;
+        st.innerHTML = r.status === 'done' ? `<img class="art" src="/api/jobs/${r.id}/art?v=${Date.now()}"><h1>Drawn! ✓</h1><p class="sub"><b>1.</b> Lift your sketch out of the frame.<br><b>2.</b> Lay a fresh sheet in the frame for the next person.<br><b>3.</b> Tap the button. Keep hands clear — the robot starts by itself.</p><button class="btn primary big" id="paperBtn">PAPER IS IN ✓</button>`
+          : `<h1>${where || 'The robot'} needs fresh paper</h1><p class="sub">The last drawing (#${r.paper.number}) is still in the frame.<br><b>1.</b> Take it out and set it aside for its owner.<br><b>2.</b> Lay a fresh sheet in the frame.<br><b>3.</b> Tap the button — your sketch (#${r.number}) starts right after. Keep hands clear.</p><button class="btn primary big" id="paperBtn">PAPER IS IN ✓</button><p class="sub" id="cd"></p>`;
+        $('paperBtn').onclick = async () => { $('paperBtn').disabled = true; $('paperBtn').textContent = 'Thanks!'; await fetch('/api/bots/' + (r.bot || 1) + '/paper', { method: 'POST' }).catch(() => {}); if (r.status === 'done') goHome(); else { st.dataset.v = ''; poll(); } }; }
+      if (r.status === 'done' && !S.cdTimer) startCountdown(120); S.pollTimer = setTimeout(poll, 3000); return; }
+    st.dataset.v = '';
     const line = r.status === 'done' ? (multi && r.bot ? `Drawn! Pick it up at ${where}` : 'Drawn! Pick it up at the robot.')
       : r.status === 'drawing' ? (multi && r.bot ? `${where} is drawing you right now!` : 'The robot is drawing you right now!')
       : multi ? (r.bot ? `Your sketch will be drawn at ${where} — head over there! You're <b>#${r.position || '?'}</b> in its line.` : `Your sketch is ready — the next free robot will draw it. You're <b>#${r.position || '?'}</b> in line.`) : 'Watch the robot — your sketch is <b>#' + (r.position || '?') + '</b> in line.';

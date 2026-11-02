@@ -217,10 +217,10 @@
         <div id="botStrip" class="botStrip" style="display:none"></div>
         <div class="note" id="resumeBox" style="display:none;border:2px solid var(--acc);border-radius:10px;padding:8px 10px;margin-bottom:8px;background:#eaf2ff;color:var(--ink)"></div>
         <div class="qCur" id="qCur" style="display:none"><img id="qCurImg" alt=""><div><b id="qCurName"></b><div class="note" id="qCurNote"></div></div></div>
-        <div class="btns"><button id="btnQNext" class="primary big">1 · Load next sketch</button><button id="btnQDraw" class="primary big" style="display:none">2 · Draw it</button><button id="btnQContinue" class="primary big" style="display:none">Continue →</button><button id="btnQSkipCur" class="danger">✕ Skip</button></div>
+        <div class="btns"><button id="btnQNext" class="primary big">1 · Load next sketch</button><button id="btnQDraw" class="primary big" style="display:none">2 · Draw it</button><button id="btnQContinue" class="primary big" style="display:none">Continue →</button><button id="btnQPaper" class="primary big" style="display:none" title="Unmanned event: the robot is waiting for a guest to tap paper-is-in on the iPad. Press this if you changed the paper yourself.">Paper is in →</button><button id="btnQSkipCur" class="danger">✕ Skip</button></div>
         <div class="note" id="qStatus">Guests' sketches appear here when ready.</div>
         <div class="btns" style="margin-top:8px"><span class="note" style="align-self:center">Hands-free:</span><button id="btnQAuto">▶ Auto-run queue</button></div>
-        <div class="row"><label>Auto-run: pause after each drawing (to change paper)</label><input id="qPause" type="checkbox" checked></div>
+        <div class="row"><label>Auto-run: pause after each drawing (to change paper)</label><input id="qPause" type="checkbox" checked></div><div class="row" id="qUnmannedRow" style="display:none"><span class="note">Unmanned event (Admin → Settings): after each drawing the arm waits until a guest taps "paper is in" on the iPad, then draws the next one by itself. Pause-between is ignored.</span></div>
         <div class="row"><label>Auto-run: preview countdown before drawing</label><input id="qPreview" type="checkbox" checked><input id="qPreviewSecs" type="number" value="6" min="0" step="1" style="width:56px"><span class="unit">s</span></div>
         <div class="row"><label>Drawing size for this event</label><select id="qSize"><option value="fit">Fit to page</option><option value="4">4 in wide</option><option value="5">5 in wide</option><option value="6" selected>6 in wide</option><option value="7">7 in wide</option><option value="8">8 in wide</option><option value="custom">Custom…</option></select></div>
         <div class="row" id="qSizeCustomRow" style="display:none"><label>Custom width</label><input id="qSizeCustom" type="number" value="5.5" step="0.25" min="1"><span class="unit">in</span></div>
@@ -1733,7 +1733,7 @@ window.DEXARM_PEN_OFFSET=114;
     heartbeat();
     let d; try { d = await qFetch('/api/queue'); Q.available = true; } catch (_) { Q.available = false; $('qList').innerHTML = '<div class="note">Queue server not reachable (open this page from the Sketchy server to use the event queue).</div>'; return; }
     if (!Q.checked) { Q.checked = true; const cp = loadCheckpoint(); for (const j of d.jobs.filter(j => j.status === 'drawing' && !(cp && cp.job && cp.job.id === j.id))) { log(`queue: #${j.number} was interrupted (page reloaded) — put back in line`); await qStatus(j.id, 'ready').catch(() => {}); j.status = 'ready'; } }
-    const nBots = Math.max(1, +(d.settings && d.settings.bots) || 1); syncBotUI(nBots, d.bots || []);
+    const nBots = Math.max(1, +(d.settings && d.settings.bots) || 1); syncBotUI(nBots, d.bots || []); Q.unmanned = !!(d.settings && d.settings.staffing === 'unmanned'); $('qUnmannedRow').style.display = Q.unmanned ? '' : 'none'; $('qPause').disabled = Q.unmanned; if (Q.unmanned && Q.waitingContinue) { Q.waitingContinue = false; $('btnQContinue').style.display = 'none'; }
     const mine = j => nBots <= 1 || j.bot === BOT || !j.bot, readyAll = d.jobs.filter(j => j.status === 'ready');
     const ready = readyAll.filter(mine), proc = d.jobs.filter(j => j.status === 'pending' || j.status === 'processing');
     $('qSum').textContent = nBots > 1 ? `${ready.length} for Bot ${BOT} · ${readyAll.length} ready in all · ${proc.length} generating · ${d.done.length} drawn` : `${ready.length} ready · ${proc.length} generating · ${d.done.length} drawn`;
@@ -1757,7 +1757,7 @@ window.DEXARM_PEN_OFFSET=114;
   async function qLoadNext() {
     if (Q.busy || S.running || Q.loaded) return false; Q.busy = true; $('btnQNext').disabled = true; let job = null;
     try {
-      ({ job } = await qFetch('/api/queue/claim', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bot: BOT }) })); if (!job) { $('qStatus').textContent = 'Nothing ready yet — it loads as soon as a guest\'s sketch is finished.'; return false; }
+      let wait, since; ({ job, wait, since } = await qFetch('/api/queue/claim', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bot: BOT }) })); if (!job) { if (wait === 'paper') { $('qStatus').textContent = 'waiting for the guest to put in fresh paper (' + Math.round((Date.now() - since) / 1000) + ' s)… or press "Paper is in" if you changed it yourself'; $('btnQPaper').style.display = ''; } else { $('qStatus').textContent = 'Nothing ready yet — it loads as soon as a guest\'s sketch is finished.'; $('btnQPaper').style.display = 'none'; } return false; } $('btnQPaper').style.display = 'none';
       Q.current = job; $('qStatus').textContent = `#${job.number} ${job.themeName}: converting…`;
       await loadFromUrl(`/api/jobs/${job.id}/art`, `queue-${job.number}.png`);
       await new Promise(r => setTimeout(r, 400)); for (let i = 0; i < 100 && (S.planDirty || !S.plan); i++) await new Promise(r => setTimeout(r, 200)); // trace worker + planner
@@ -1798,7 +1798,7 @@ window.DEXARM_PEN_OFFSET=114;
     if (Q.cancelPreview) { Q.cancelPreview = false; await qSkipLoaded(); return; }
     if (!Q.on) { $('qStatus').textContent = `#${job.number} is on the canvas — press 2 · Draw it.`; return; }
     const ok = await qDrawLoaded();
-    if (ok && Q.on) { if ($('qPause').checked) { Q.waitingContinue = true; $('qStatus').textContent = `#${job.number} done ✓ — change the paper, then press Continue`; $('btnQContinue').style.display = ''; } else $('qStatus').textContent = `#${job.number} done ✓ — next one starts automatically`; }
+    if (ok && Q.on) { if (Q.unmanned) { $('qStatus').textContent = '#' + job.number + ' done ✓ — the next one starts when a guest taps "paper is in" on the iPad'; } else if ($('qPause').checked) { Q.waitingContinue = true; $('qStatus').textContent = `#${job.number} done ✓ — change the paper, then press Continue`; $('btnQContinue').style.display = ''; } else $('qStatus').textContent = `#${job.number} done ✓ — next one starts automatically`; }
   }
   function eventWidthMm() { const v = $('qSize').value; if (v === 'fit') return null; const inches = v === 'custom' ? num('qSizeCustom') : +v; return inches > 0 ? inches * IN : null; }
   /** a line of plotter text as a canvas object (strokes in font units, like an SVG) */
@@ -1842,6 +1842,7 @@ window.DEXARM_PEN_OFFSET=114;
   $('btnQAuto').addEventListener('click', () => { if (!link.connected) { log('connect the arm first', 'err'); return; } if (S.needsHome) { log('press ⌂ Home first (STOP was used)', 'err'); return; } Q.on = !Q.on; syncQ(); if (Q.on) { log('auto-run on: setup must be done (Home, pen height, paper center)'); qRefresh(); } });
   $('btnQNext').addEventListener('click', () => { if (!link.connected) { log('connect the arm first', 'err'); return; } if (S.needsHome) { log('press ⌂ Home first (STOP was used)', 'err'); return; } qLoadNext(); });
   $('btnQDraw').addEventListener('click', () => { if (!link.connected) { log('connect the arm first', 'err'); return; } if (S.needsHome) { log('press ⌂ Home first (STOP was used)', 'err'); return; } qDrawLoaded(); });
+  $('btnQPaper').addEventListener('click', async () => { await qFetch('/api/bots/' + BOT + '/paper', { method: 'POST' }); $('btnQPaper').style.display = 'none'; qRefresh(); });
   $('btnQContinue').addEventListener('click', () => { Q.waitingContinue = false; $('btnQContinue').style.display = 'none'; qRefresh(); });
   $('btnQSkipCur').addEventListener('click', () => { Q.cancelPreview = true; if (S.running) S.stopFlag = true; else if (Q.loaded) qSkipLoaded(); });
   // auto-run survives a page reload: it resumes as soon as the arm has reconnected
