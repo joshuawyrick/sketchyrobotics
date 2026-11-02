@@ -337,6 +337,52 @@ app.get('/api/admin/drawlog.csv', adminAuth, (req, res) => { // every drawing th
   res.setHeader('content-type', 'text/csv'); res.setHeader('content-disposition', 'attachment; filename="sketchy-draw-log.csv"');
   res.send(lines.join('\n'));
 });
+// ----- theme import / export (zip: one folder per theme, one prompt file per combination) -----
+const VARIANT_FILES = { '1-male': ['single-male', '1-male', 'male', 'man'], '1-female': ['single-female', '1-female', 'female', 'woman'], '2-male-male': ['two-males', '2-male-male', 'male-male', 'two-men'], '2-female-female': ['two-females', '2-female-female', 'female-female', 'two-women'], '2-male-female': ['male-left-female-right', '2-male-female', 'male-female'], '2-female-male': ['female-left-male-right', '2-female-male', 'female-male'], 'pet-male': ['male-pet', 'pet-male', 'man-pet'], 'pet-female': ['female-pet', 'pet-female', 'woman-pet'] };
+const normName = n => String(n).toLowerCase().replace(/\.(md|markdown|txt)$/, '').replace(/[\s_\-]+/g, '');
+const variantFor = name => { const k = normName(name); for (const v of VARIANTS) if (VARIANT_FILES[v].some(a => a.replace(/-/g, '') === k)) return v; return null; };
+function parseZipThemes(buf) { // -> [{ name, prompts:{v:text}, thumb:Buffer|null, settings:{...}, unknown:[names] }]
+  const AdmZip = require('adm-zip'); const zip = new AdmZip(buf); const themes = new Map();
+  for (const e of zip.getEntries()) { if (e.isDirectory) continue; const parts = e.entryName.split('/').filter(p => p && p !== '.'); if (parts.some(p => p.startsWith('__MACOSX') || p.startsWith('.'))) continue;
+    const file = parts[parts.length - 1]; let theme = parts.length >= 2 ? parts[parts.length - 2] : null; if (!theme) continue; // files must sit in a theme folder
+    const t = themes.get(theme) || { name: theme, prompts: {}, thumb: null, settings: {}, unknown: [] }; themes.set(theme, t);
+    const low = file.toLowerCase();
+    if (/^thumbnail\.(png|jpe?g|webp)$/.test(low)) { t.thumb = e.getData(); continue; }
+    if (low === 'theme.txt' || low === 'theme.md') { for (const line of e.getData().toString('utf8').split(/\r?\n/)) { const m = line.match(/^\s*([\w.\-]+)\s*:\s*(.+?)\s*$/); if (m) t.settings[m[1].toLowerCase()] = m[2]; } continue; }
+    if (!/\.(md|markdown|txt)$/i.test(low)) { t.unknown.push(file); continue; }
+    const v = variantFor(file); if (!v) { t.unknown.push(file); continue; } t.prompts[v] = e.getData().toString('utf8').replace(/^\uFEFF/, '').trim(); }
+  return [...themes.values()];
+}
+app.post('/api/admin/themes/import', adminAuth, upload.single('zip'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'no zip' }); const preview = req.query.preview === '1'; const found = parseZipThemes(req.file.buffer); if (!found.length) return res.status(400).json({ error: 'No theme folders found. Each theme must be a folder containing its prompt files.' });
+    const report = [];
+    for (const t of found) {
+      let existing = listThemes().find(x => x.name.toLowerCase() === t.name.toLowerCase()); const slug = existing ? existing.slug : slugify(t.name);
+      const replaced = existing ? Object.keys(t.prompts).filter(v => existing.prompts[v] && existing.prompts[v].trim() && existing.prompts[v].trim() !== t.prompts[v]) : [];
+      report.push({ name: t.name, slug, isNew: !existing, prompts: Object.keys(t.prompts).length, replaced: replaced.map(v => VARIANT_LABELS[v]), empty: Object.keys(t.prompts).filter(v => !t.prompts[v]).map(v => VARIANT_LABELS[v]), thumb: !!t.thumb, settings: Object.keys(t.settings), unknown: t.unknown });
+      if (preview) continue;
+      const base = existing || { name: t.name, enabled: false, order: listThemes().length + 1, prompts: {}, variantModels: {} };
+      const st = t.settings; const yes = v => /^(yes|true|on|1)$/i.test(v); 
+      const th = Object.assign({}, base, { name: existing ? existing.name : t.name, prompts: Object.assign({}, base.prompts, t.prompts), variantModels: Object.assign({}, base.variantModels || {}) });
+      if (st.model != null) th.model = st.model; if (st.quality != null) th.quality = st.quality; if (st.moderation != null) th.moderation = st.moderation; if (st.order != null && isFinite(+st.order)) th.order = +st.order; if (st.enabled != null) th.enabled = yes(st.enabled);
+      for (const k of Object.keys(st)) { const m = k.match(/^(.+)\.(model|quality)$/); if (!m) continue; const v = variantFor(m[1]); if (!v) continue; th.variantModels[v] = Object.assign({}, th.variantModels[v] || {}, { [m[2]]: st[k] }); }
+      writeTheme(slug, th);
+      if (t.thumb) { try { await sharp(t.thumb).rotate().resize(700, 700, { fit: 'inside', withoutEnlargement: true }).png().toFile(path.join(THEMES, slug, 'thumb.png')); persist(path.join(THEMES, slug, 'thumb.png')); } catch (e) { report[report.length - 1].thumbError = e.message; } }
+    }
+    res.json({ ok: true, preview, themes: report });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/admin/themes/export', adminAuth, async (req, res) => { // ?slug=rockstar or all
+  const AdmZip = require('adm-zip'); const zip = new AdmZip(); const which = req.query.slug ? listThemes().filter(t => t.slug === req.query.slug) : listThemes();
+  for (const t of which) { const dir = t.name.replace(/[\\/:*?"<>|]/g, '-');
+    for (const v of VARIANTS) if (t.prompts[v] && t.prompts[v].trim()) zip.addFile(`${dir}/${VARIANT_FILES[v][0]}.md`, Buffer.from(t.prompts[v], 'utf8'));
+    const lines = [`enabled: ${t.enabled ? 'yes' : 'no'}`, `order: ${t.order || 0}`]; if (t.model) lines.push('model: ' + t.model); if (t.quality) lines.push('quality: ' + t.quality); if (t.moderation) lines.push('moderation: ' + t.moderation);
+    for (const v of VARIANTS) { const vm = t.variantModels[v] || {}; if (vm.model) lines.push(`${VARIANT_FILES[v][0]}.model: ${vm.model}`); if (vm.quality) lines.push(`${VARIANT_FILES[v][0]}.quality: ${vm.quality}`); }
+    zip.addFile(`${dir}/theme.txt`, Buffer.from(lines.join('\n') + '\n', 'utf8'));
+    const th = path.join(THEMES, t.slug, 'thumb.png'); if (await ensureLocal(th)) zip.addFile(`${dir}/thumbnail.png`, fs.readFileSync(th)); }
+  res.setHeader('content-type', 'application/zip'); res.setHeader('content-disposition', `attachment; filename="${req.query.slug ? which[0] ? which[0].name.replace(/[^\w.-]+/g, '-') : 'theme' : 'sketchy-themes'}.zip"`); res.send(zip.toBuffer());
+});
 app.get('/api/jobs/:id/photo', adminAuth, async (req, res) => { const f = path.join(JOBS, req.params.id, 'photo.jpg'); if (await ensureLocal(f)) res.sendFile(f); else res.status(404).end(); });
 
 restoreFromBucket().catch(e => console.log('storage restore failed:', e.message)).then(() => { loadState(); app.listen(PORT, '0.0.0.0', () => console.log(`Sketchy Robotics server on :${PORT}  data=${DATA}  key=${OPENAI_KEY ? 'set' : 'MISSING'}`)); });
