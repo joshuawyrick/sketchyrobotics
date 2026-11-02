@@ -137,6 +137,7 @@ async function generateArt(job, override) {
     form.delete(bad); job.droppedParam = (job.droppedParam ? job.droppedParam + ', ' : '') + bad; ({ res, body } = await call(form));
   }
   if (!res.ok) throw new Error('OpenAI ' + res.status + ': ' + (body.error && body.error.message || JSON.stringify(body)).slice(0, 300));
+  job.used.moderationSent = form.has('moderation') ? form.get('moderation') : 'not accepted by this model';
   const b64 = body.data && body.data[0] && body.data[0].b64_json; if (!b64) throw new Error('OpenAI returned no image');
   // normalise: flatten onto white, make sure it's a clean PNG the tracer likes
   const png = await sharp(Buffer.from(b64, 'base64')).flatten({ background: '#ffffff' }).png().toBuffer();
@@ -365,7 +366,7 @@ app.post('/api/admin/builder/test', adminAuth, async (req, res) => { // generate
     const results = await Promise.all(runs.map(async ({ v, model, photo }) => { const id = 'lab-' + crypto.randomBytes(4).toString('hex'); const prompt = d.prompts[fl][v];
       const job = { id, number: 0, status: 'processing', theme: scratchSlug, themeName: d.name || 'draft', variant: v, createdAt: Date.now(), attempts: 1, test: true, lab: true, builder: true, flavor: fl, batch, photoHash: d.refs[v], labPrompt: prompt, labModel: model };
       fs.mkdirSync(path.join(JOBS, id), { recursive: true }); fs.writeFileSync(path.join(JOBS, id, 'photo.jpg'), photo); persist(path.join(JOBS, id, 'photo.jpg')); jobs.set(id, job); const t0 = Date.now();
-      const override = { model, prompt, moderation: rating === 'adult' ? 'low' : 'auto' }; if (req.body.quality) override.quality = String(req.body.quality);
+      const override = { model, prompt, moderation: 'low' }; if (req.body.quality) override.quality = String(req.body.quality); // Builder always tests at the loosest setting the API offers
       try { await generateArt(job, override); job.status = 'test'; job.readyAt = Date.now(); } catch (e) { job.status = 'failed'; job.error = String(e.message || e); }
       job.seconds = Math.round((Date.now() - t0) / 1000); saveJob(job); return Object.assign(labJob(job), { flavor: fl }); }));
     res.json({ ok: true, results });
@@ -381,7 +382,7 @@ app.post('/api/admin/builder/check', adminAuth, async (req, res) => { // cheap p
     const results = await Promise.all(variants.map(async v => { const photo = (d.refs && d.refs[v] ? await refBuffer(d.refs[v]) : null) || fallback; if (!photo) return { v, label: VARIANT_LABELS[v], error: 'add at least one face to the library first' };
       const id = 'lab-' + crypto.randomBytes(4).toString('hex'); const job = { id, number: 0, status: 'processing', theme: scratchSlug, themeName: d.name || 'draft', variant: v, createdAt: Date.now(), attempts: 1, test: true, lab: true, builder: true, check: true, flavor: fl, labPrompt: d.prompts[fl][v], labModel: model };
       fs.mkdirSync(path.join(JOBS, id), { recursive: true }); fs.writeFileSync(path.join(JOBS, id, 'photo.jpg'), photo); jobs.set(id, job); const t0 = Date.now();
-      try { await generateArt(job, { model, prompt: d.prompts[fl][v], quality: 'low', moderation: rating === 'adult' ? 'low' : 'auto' }); job.status = 'test'; job.readyAt = Date.now(); } catch (e) { job.status = 'failed'; job.error = String(e.message || e); }
+      try { await generateArt(job, { model, prompt: d.prompts[fl][v], quality: 'low', moderation: 'low' }); job.status = 'test'; job.readyAt = Date.now(); } catch (e) { job.status = 'failed'; job.error = String(e.message || e); }
       job.seconds = Math.round((Date.now() - t0) / 1000); saveJob(job); const refused = job.status === 'failed' && /safety|moderation|policy|rejected|not allowed|content/i.test(job.error || '');
       return { v, label: VARIANT_LABELS[v], ok: job.status === 'test', refused, error: job.error, art: job.status === 'test' ? `/api/jobs/${id}/art` : null, seconds: job.seconds }; }));
     const d2 = getDraft(); d2.checks = d2.checks || {}; d2.checks[fl] = Object.assign(d2.checks[fl] || {}, Object.fromEntries(results.map(r => [r.v, { ok: !!r.ok, refused: !!r.refused, error: r.error || null, art: r.art || null, at: Date.now() }]))); saveDraft(d2);
