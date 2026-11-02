@@ -411,6 +411,22 @@ app.post('/api/admin/builder/publish', adminAuth, async (req, res) => { // one f
     res.json({ ok: true, slug, name: readTheme(slug).name, isNew: !existing });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// ----- Lab: test every prompt a theme already has, one reference face per combination, across the ticked models -----
+app.post('/api/admin/lab/theme-test', adminAuth, async (req, res) => {
+  try { const theme = readTheme(slugify(req.body.theme || '')); if (!theme) return res.status(400).json({ error: 'pick a theme' }); const st = getSettings();
+    const models = (Array.isArray(req.body.models) && req.body.models.length ? req.body.models : (st.testModels || [st.model])).filter(Boolean).slice(0, 6); const refs = req.body.refs || {};
+    const variants = VARIANTS.filter(v => theme.prompts[v] && theme.prompts[v].trim() && refs[v]); if (!variants.length) return res.status(400).json({ error: 'no combination has both a saved prompt and a reference face' });
+    const batch = 'lab-' + Date.now().toString(36); const runs = [];
+    for (const v of variants) { const photo = await refBuffer(refs[v]); if (!photo) continue; for (const model of models) runs.push({ v, model, photo }); }
+    const results = await Promise.all(runs.map(async ({ v, model, photo }) => { const id = 'lab-' + crypto.randomBytes(4).toString('hex');
+      const job = { id, number: 0, status: 'processing', theme: theme.slug, themeName: theme.name, variant: v, createdAt: Date.now(), attempts: 1, test: true, lab: true, batch, photoHash: refs[v], labPrompt: theme.prompts[v], labModel: model };
+      fs.mkdirSync(path.join(JOBS, id), { recursive: true }); fs.writeFileSync(path.join(JOBS, id, 'photo.jpg'), photo); persist(path.join(JOBS, id, 'photo.jpg')); jobs.set(id, job); const t0 = Date.now();
+      const override = { model, moderation: 'low' }; if (req.body.quality) override.quality = String(req.body.quality);
+      try { await generateArt(job, override); job.status = 'test'; job.readyAt = Date.now(); } catch (e) { job.status = 'failed'; job.error = String(e.message || e); }
+      job.seconds = Math.round((Date.now() - t0) / 1000); saveJob(job); return labJob(job); }));
+    res.json({ ok: true, batch, results });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post('/api/admin/lab-clear', adminAuth, (req, res) => { // wipe lab results: all, one theme, or everything except results in use
   const scope = String(req.body.scope || 'all'); const theme = req.body.theme ? slugify(req.body.theme) : null; let n = 0;
   for (const j of [...jobs.values()]) { if (!j.lab) continue; if (scope === 'theme' && j.theme !== theme) continue; if (req.body.keepApplied && j.applied) continue;

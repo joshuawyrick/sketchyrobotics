@@ -50,7 +50,7 @@
 </head>
 <body>
 <header><svg class="logo" viewBox="60 150 1870 400"></svg><span class="t">Admin</span>
-  <nav id="nav"><button data-t="queue" class="on">Queue</button><button data-t="themes">Themes</button><button data-t="builder">Theme Builder</button><button data-t="test">Prompt Lab</button><button data-t="foundations">Foundations</button><button data-t="settings">Settings</button><a href="/studio" target="_blank"><button>Open Plotter Studio ↗</button></a></nav></header>
+  <nav id="nav"><button data-t="queue" class="on">Queue</button><button data-t="themes">Themes</button><button data-t="test">Prompt Lab</button><button data-t="foundations">Foundations</button><button data-t="settings">Settings</button><a href="/studio" target="_blank"><button>Open Plotter Studio ↗</button></a></nav></header>
 <main>
   <div class="login card" id="login"><h2>Admin password</h2><input type="password" id="pw" placeholder="password"><div class="row" style="margin-top:10px"><button class="primary" id="loginBtn">Sign in</button><span id="loginErr" class="bad"></span></div></div>
 
@@ -92,7 +92,7 @@
     </div>
   </section>
 
-  <section class="tab" id="tab-builder">
+  <section class="tab" id="tab-builder" style="display:none!important">
     <div class="card"><h2>Theme Builder <span class="note">name it → describe it → references → write → test → pick → publish. The draft saves as you go.</span><button id="bReset" class="danger" style="margin-left:auto">Start a new draft</button></h2>
       <h3 class="stepH">1 · Define</h3>
       <div class="row"><label>Theme name</label><input id="bName" style="max-width:320px" placeholder="Rockstar"></div>
@@ -121,11 +121,18 @@
   </section>
 
   <section class="tab" id="tab-test">
-    <div class="card"><h2>Prompt Lab <span class="note">write a prompt, try it on one face with one or many models, keep the winner</span></h2>
+    <div class="card"><h2>Prompt Lab <span class="note">test a theme's saved prompts on your reference faces across the models you tick; keep the winners</span></h2>
+      <div class="row"><label>Theme</label><select id="ltTheme" style="max-width:300px"></select><span class="note" id="ltInfo"></span></div>
+      <div class="refLib"><span class="note">Faces:</span><div id="ltLib" class="refStrip"></div><button id="ltLibAdd">+ Add a face</button><input type="file" id="ltLibIn" accept="image/*" style="display:none"><span class="note">click a face, then the combinations it should test (or drop a photo on a slot). Leave a slot empty to skip it.</span></div>
+      <div id="ltSlots" class="slots"></div>
+      <div class="row" style="align-items:flex-start;margin-top:8px"><label>Models</label><div style="flex:1"><div id="ltModels" class="modelBoxes"></div><div class="note"><button id="ltAll" style="padding:2px 8px;min-height:0;font-size:12px">All</button> <button id="ltNone" style="padding:2px 8px;min-height:0;font-size:12px">None</button> · default ticks come from Settings → Default test models</div></div></div>
+      <div class="row"><label>Quality</label><select id="ltQuality" style="width:auto"><option value="">(use Settings)</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="auto">auto</option></select><button class="primary" id="ltRun">Test this theme's prompts</button><span id="ltMsg" class="note"></span></div>
+      <div id="ltGrid"></div>
+      <details style="margin-top:14px"><summary class="note">Single-prompt test (write or paste one prompt and try it on one face)</summary>
       <div class="row"><label>Theme</label><select id="tTheme" style="max-width:280px"></select><span class="note">New themes start inactive — guests only see a theme once you tick Enabled in Themes.</span></div>
       <div class="row"><label>Combination</label><select id="tVar" style="max-width:280px"></select><span class="note" id="tBoxState"></span></div>
       <div class="row" style="align-items:flex-start"><label>Reference photo</label><div style="flex:1"><input type="file" id="tPhoto" accept="image/*"> <span class="note" id="tPhotoNote"></span><div id="refStrip" class="refStrip"></div></div></div>
-      <div class="writer" id="writer">
+      <div class="writer" id="writer" style="display:none">
         <h3 style="margin:0 0 6px;font-size:14px">AI prompt writer <span class="note">describe the theme; the foundation's no-compromise rules go in verbatim, the AI adds outfit, pose, props and body details for the combination</span></h3>
         <div class="row"><label>Foundation</label><select id="wFound" style="max-width:260px"></select><a href="#" id="wEditFound" class="note">edit foundations ↗</a>
           <label style="width:auto;margin-left:14px">Text model</label><select id="wModel" style="max-width:220px"></select></div>
@@ -140,6 +147,7 @@
         <label style="width:auto;margin-left:14px">Moderation</label><select id="tMod" style="max-width:160px"><option value="">(use Settings)</option><option value="low">low</option><option value="auto">auto</option></select></div>
       <div class="row"><button class="primary" id="tRun">Generate</button><span id="tMsg" class="note"></span></div>
       <div id="labOut" class="labGrid"></div>
+      </details>
     </div>
     <div class="card"><h2>Earlier results <span class="note">last 80 — click "Use this" on any card to make it a theme's master prompt + model</span> <label class="note" style="margin-left:auto;display:flex;gap:6px;align-items:center"><input type="checkbox" id="labOnlyTheme" checked> only this theme</label></h2>
       <div class="row" style="gap:8px;flex-wrap:wrap"><button id="labClearTheme">Clear this theme's results</button><button id="labClearAll" class="danger">Clear ALL results</button><label class="note" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="labKeepApplied" checked> keep results marked "in use"</label><span class="note">Clearing deletes the test images; the prompts and models already applied to themes are not affected.</span></div>
@@ -195,7 +203,7 @@
     try { STATE = await api('/api/admin/state'); } catch (e) { return; }
     $('login').style.display = 'none';
     renderQueue(); renderThemes(); renderSettings(); renderTest();
-    if (!refresh.modelsLoaded) { refresh.modelsLoaded = true; loadModels(false); loadLab(); loadBuilder(); }
+    if (!refresh.modelsLoaded) { refresh.modelsLoaded = true; loadModels(false); loadLab(); ltLoad(); }
   }
   // ----- queue -----
   const fmt = ms => { const d = new Date(ms); return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
@@ -286,7 +294,7 @@
   // ----- test -----
   // ----- Prompt Lab -----
   let LAB = { results: [], ref: null, hidden: [] }; // ref: lab job id whose photo to reuse
-  function renderTest() { const cur = $('tTheme').value; $('tTheme').innerHTML = STATE.themes.map(t => `<option value="${t.slug}">${t.name}${t.enabled === false ? ' (inactive)' : ''}</option>`).join(''); if (cur) $('tTheme').value = cur; fillVars(); }
+  function renderTest() { if (typeof ltLoad === 'function' && LT.refs) { const c = $('ltTheme').value; $('ltTheme').innerHTML = STATE.themes.map(t => `<option value="${t.slug}">${t.name}${t.enabled === false ? ' (inactive)' : ''}${t.rating === 'adult' ? ' · 18+' : ''}</option>`).join(''); if (c) $('ltTheme').value = c; } const cur = $('tTheme').value; $('tTheme').innerHTML = STATE.themes.map(t => `<option value="${t.slug}">${t.name}${t.enabled === false ? ' (inactive)' : ''}</option>`).join(''); if (cur) $('tTheme').value = cur; fillVars(); }
   function fillVars() { const t = STATE.themes.find(x => x.slug === $('tTheme').value); const cur = $('tVar').value; $('tVar').innerHTML = STATE.variantOrder.map(v => `<option value="${v}">${STATE.variants[v]}${t && !t.prompts[v].trim() ? ' (no prompt yet)' : ''}</option>`).join(''); if (cur) $('tVar').value = cur; boxState(); }
   function boxState() { const t = STATE.themes.find(x => x.slug === $('tTheme').value); if (!t) return; const v = $('tVar').value, vm = t.variantModels[v] || {}; $('tBoxState').textContent = t.prompts[v].trim() ? `saved: ${t.prompts[v].length} chars · model ${vm.model || t.model || 'Settings'}` : 'nothing saved yet for this combination'; if (!$('tPrompt').value.trim()) $('tPrompt').value = t.prompts[v] || ''; cnt(); renderHist(); }
   const cnt = () => $('tPromptCnt').textContent = $('tPrompt').value.length + ' chars';
@@ -344,6 +352,7 @@
     fillTestModelBoxes();
   }
   function fillTestModelBoxes() { const saved = new Set((STATE.settings && STATE.settings.testModels) || []); const list = Array.from(new Set(MODELS.concat([...saved]))).sort();
+    { const cur = new Set(Array.from(document.querySelectorAll('#ltModels input:checked')).map(i => i.value)); const pre = cur.size ? cur : saved; $('ltModels').innerHTML = list.map(m => `<label><input type="checkbox" value="${m}" ${pre.has(m) ? 'checked' : ''}> ${m}</label>`).join(''); }
     for (const [id, pre] of [['sTestModels', saved], ['bTestModels', new Set(Array.from(document.querySelectorAll('#bTestModels input:checked')).map(i => i.value)).size ? new Set(Array.from(document.querySelectorAll('#bTestModels input:checked')).map(i => i.value)) : saved]]) $(id).innerHTML = list.map(m => `<label><input type="checkbox" value="${m}" ${pre.has(m) ? 'checked' : ''}> ${m}</label>`).join(''); }
   let TEXT_MODELS = ['gpt-4.1-mini', 'gpt-4.1', 'gpt-4o-mini', 'gpt-4o', 'gpt-5-mini', 'gpt-5'];
   function fillTextModels() { const saved = (STATE.settings && STATE.settings.textModel) || 'gpt-4.1-mini'; const list = Array.from(new Set(TEXT_MODELS.concat([saved]))).sort(); const opts = list.map(m => `<option value="${m}">${m}</option>`).join(''); $('sTextModel').innerHTML = opts; $('sTextModel').value = saved; const w = $('wModel').value; $('wModel').innerHTML = '<option value="">(use Settings)</option>' + opts; $('wModel').value = list.includes(w) ? w : ''; }
@@ -358,6 +367,31 @@
   $('foundSave').onclick = async () => { try { const foundations = readFoundations(); const safetyFoundation = $('safetyText').value; await api('/api/admin/settings', { method: 'POST', json: { foundations, safetyFoundation } }); STATE.settings.foundations = foundations; STATE.settings.safetyFoundation = safetyFoundation; $('foundMsg').textContent = 'Saved ✓'; toast('Foundations saved'); setTimeout(() => $('foundMsg').textContent = '', 4000); fillFoundSel(); } catch (e) { toast('Save failed: ' + e.message, 'bad'); } };
   function fillFoundSel() { const cur = $('wFound').value; const fs = STATE.settings.foundations || []; $('wFound').innerHTML = fs.map(f => `<option value="${f.id}">${f.name}${f.text && f.text.trim() ? '' : ' (empty)'}</option>`).join('') + '<option value="">(no foundation)</option>'; if (cur && fs.some(f => f.id === cur)) $('wFound').value = cur; }
   $('wEditFound').onclick = e => { e.preventDefault(); document.querySelector('#nav [data-t=foundations]').click(); };
+  // ----- Lab: whole-theme test -----
+  const LT = { refs: [], slots: {}, picked: null, grid: [] };
+  function ltKey() { return 'sketchy.ltSlots.' + $('ltTheme').value; }
+  async function ltLoad() { try { LT.refs = (await api('/api/admin/refs')).refs; } catch (_) { LT.refs = []; } const cur = $('ltTheme').value; $('ltTheme').innerHTML = STATE.themes.map(t => `<option value="${t.slug}">${t.name}${t.enabled === false ? ' (inactive)' : ''}${t.rating === 'adult' ? ' · 18+' : ''}</option>`).join(''); if (cur) $('ltTheme').value = cur; ltTheme(); }
+  function ltTheme() { try { LT.slots = JSON.parse(localStorage.getItem(ltKey()) || '{}'); } catch (_) { LT.slots = {}; } const t = STATE.themes.find(x => x.slug === $('ltTheme').value); $('ltInfo').textContent = t ? `${STATE.variantOrder.filter(v => t.prompts[v].trim()).length} of 8 combinations have a prompt` : ''; ltRenderLib(); ltRenderSlots(); ltRenderGrid(); }
+  $('ltTheme').onchange = ltTheme;
+  function ltRenderLib() { $('ltLib').innerHTML = LT.refs.map(r => `<div class="ref ${LT.picked === r.id ? 'on' : ''}" data-id="${r.id}"><img src="/api/admin/refs/${r.id}?token=${encodeURIComponent(TOKEN)}"><button class="x" title="remove from library">✕</button></div>`).join('') || '<span class="note">none yet</span>';
+    $('ltLib').querySelectorAll('.ref').forEach(el => { el.querySelector('img').onclick = () => { LT.picked = LT.picked === el.dataset.id ? null : el.dataset.id; ltRenderLib(); }; el.querySelector('.x').onclick = async () => { await api('/api/admin/refs/' + el.dataset.id, { method: 'DELETE' }); LT.refs = LT.refs.filter(r => r.id !== el.dataset.id); ltRenderLib(); }; }); }
+  async function ltAddRef(file) { const fd = new FormData(); fd.append('photo', file); const r = await api('/api/admin/refs', { method: 'POST', body: fd }); if (!LT.refs.some(x => x.id === r.id)) LT.refs.unshift({ id: r.id }); return r.id; }
+  $('ltLibAdd').onclick = () => $('ltLibIn').click();
+  $('ltLibIn').onchange = async () => { const f = $('ltLibIn').files[0]; $('ltLibIn').value = ''; if (!f) return; try { LT.picked = await ltAddRef(f); ltRenderLib(); toast('Face added — now click the combinations it should test'); } catch (e) { toast('Upload failed: ' + e.message, 'bad'); } };
+  function ltRenderSlots() { const t = STATE.themes.find(x => x.slug === $('ltTheme').value); $('ltSlots').innerHTML = STATE.variantOrder.map(v => { const id = LT.slots[v]; const has = t && t.prompts[v].trim(); return `<div class="slot ${id ? 'has' : ''}" data-v="${v}" style="${has ? '' : 'opacity:.45'}">${id ? `<img src="/api/admin/refs/${id}?token=${encodeURIComponent(TOKEN)}"><button class="x">✕</button>` : '<div style="padding:26px 4px;color:var(--mut)">no face</div>'}<div><b>${STATE.variants[v]}</b>${has ? '' : '<br><span class="note">no prompt</span>'}</div></div>`; }).join('');
+    $('ltSlots').querySelectorAll('.slot').forEach(sl => { const v = sl.dataset.v; const x = sl.querySelector('.x'); if (x) x.onclick = e => { e.stopPropagation(); delete LT.slots[v]; localStorage.setItem(ltKey(), JSON.stringify(LT.slots)); ltRenderSlots(); };
+      sl.onclick = () => { if (LT.picked) { LT.slots[v] = LT.picked; localStorage.setItem(ltKey(), JSON.stringify(LT.slots)); ltRenderSlots(); } else toast('Click a face first (or drop a photo on the slot)'); };
+      sl.ondragover = e => { e.preventDefault(); sl.classList.add('over'); }; sl.ondragleave = () => sl.classList.remove('over');
+      sl.ondrop = async e => { e.preventDefault(); sl.classList.remove('over'); const f = e.dataTransfer.files[0]; if (!f) return; try { LT.slots[v] = await ltAddRef(f); localStorage.setItem(ltKey(), JSON.stringify(LT.slots)); ltRenderLib(); ltRenderSlots(); } catch (err) { toast('Upload failed: ' + err.message, 'bad'); } }; }); }
+  $('ltAll').onclick = () => document.querySelectorAll('#ltModels input').forEach(i => i.checked = true); $('ltNone').onclick = () => document.querySelectorAll('#ltModels input').forEach(i => i.checked = false);
+  $('ltRun').onclick = async () => { const t = STATE.themes.find(x => x.slug === $('ltTheme').value); if (!t) return; const models = Array.from(document.querySelectorAll('#ltModels input:checked')).map(i => i.value); if (!models.length) return toast('Tick at least one model', 'bad');
+    const refs = {}; for (const v of STATE.variantOrder) if (LT.slots[v] && t.prompts[v].trim()) refs[v] = LT.slots[v]; const n = Object.keys(refs).length; if (!n) return toast('Give at least one combination with a prompt a face', 'bad');
+    if (!confirm(`Generate ${n * models.length} image${n * models.length > 1 ? 's' : ''} for ${t.name} (${n} combination${n > 1 ? 's' : ''} × ${models.length} model${models.length > 1 ? 's' : ''})?`)) return;
+    $('ltRun').disabled = true; $('ltMsg').textContent = `Generating ${n * models.length}… usually 30–90 s`;
+    try { const r = await api('/api/admin/lab/theme-test', { method: 'POST', json: { theme: t.slug, refs, models, quality: $('ltQuality').value || undefined } }); LT.grid = r.results.concat(LT.grid); $('ltMsg').textContent = `${r.results.filter(x => x.art).length} of ${r.results.length} finished — click "Use this" under the winner in each row`; await loadLab(); ltRenderGrid(); }
+    catch (e) { $('ltMsg').textContent = ''; toast('Test failed: ' + e.message, 'bad'); } $('ltRun').disabled = false; };
+  function ltRenderGrid() { const slug = $('ltTheme').value; const rows = STATE.variantOrder.map(v => ({ v, cells: LAB.results.filter(r => r.theme === slug && r.variant === v && r.batch && LT.grid.some(g => g.batch === r.batch)) })).filter(r => r.cells.length);
+    $('ltGrid').innerHTML = rows.map(r => `<div class="bRow"><div><h4>${STATE.variants[r.v]}</h4></div><div class="labGrid" style="margin-top:0">${r.cells.map(labCard).join('')}</div></div>`).join(''); wireCards($('ltGrid')); }
   // ----- Theme Builder -----
   const BD = { d: null, tests: [], refs: [], pickedRef: null, flavor: null, saveT: null };
   const FLAVOR_LABEL = f => ({ 'family-normal': 'Family · Normal', 'family-bighead': 'Family · Big head', 'adult-normal': '18+ · Normal', 'adult-bighead': '18+ · Big head' })[f] || f;
