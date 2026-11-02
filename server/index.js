@@ -298,6 +298,12 @@ app.post('/api/admin/lab/:id/thumb', adminAuth, async (req, res) => { // use thi
   await sharp(art).resize(700, 700, { fit: 'inside', withoutEnlargement: true }).png().toFile(path.join(THEMES, theme.slug, 'thumb.png')); persist(path.join(THEMES, theme.slug, 'thumb.png'));
   res.json({ ok: true, theme: theme.slug });
 });
+app.post('/api/admin/lab-clear', adminAuth, (req, res) => { // wipe lab results: all, one theme, or everything except results in use
+  const scope = String(req.body.scope || 'all'); const theme = req.body.theme ? slugify(req.body.theme) : null; let n = 0;
+  for (const j of [...jobs.values()]) { if (!j.lab) continue; if (scope === 'theme' && j.theme !== theme) continue; if (req.body.keepApplied && j.applied) continue;
+    jobs.delete(j.id); fs.rmSync(path.join(JOBS, j.id), { recursive: true, force: true }); unpersist(path.join(JOBS, j.id)); n++; }
+  res.json({ ok: true, n });
+});
 app.delete('/api/admin/lab/:id', adminAuth, (req, res) => { const j = jobs.get(req.params.id); if (j && j.lab) { jobs.delete(j.id); fs.rmSync(path.join(JOBS, j.id), { recursive: true, force: true }); unpersist(path.join(JOBS, j.id)); } res.json({ ok: true }); });
 app.post('/api/admin/jobs/:id', adminAuth, (req, res) => { // actions: retry, front, skip, requeue (draw again)
   const j = jobs.get(req.params.id); if (!j) return res.status(404).end();

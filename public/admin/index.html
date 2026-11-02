@@ -96,6 +96,7 @@
       <div id="labOut" class="labGrid"></div>
     </div>
     <div class="card"><h2>Earlier results <span class="note">last 80 — click "Use this" on any card to make it a theme's master prompt + model</span> <label class="note" style="margin-left:auto;display:flex;gap:6px;align-items:center"><input type="checkbox" id="labOnlyTheme" checked> only this theme</label></h2>
+      <div class="row" style="gap:8px;flex-wrap:wrap"><button id="labClearTheme">Clear this theme's results</button><button id="labClearAll" class="danger">Clear ALL results</button><label class="note" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="labKeepApplied" checked> keep results marked "in use"</label><span class="note">Clearing deletes the test images; the prompts and models already applied to themes are not affected.</span></div>
       <div id="labHist" class="labGrid"></div>
     </div>
   </section>
@@ -257,6 +258,9 @@
   }
   function renderHist() { const onlyTheme = $('labOnlyTheme').checked, th = $('tTheme').value; const shown = new Set(Array.from($('labOut').querySelectorAll('.lab')).map(d => d.dataset.id)); const rs = LAB.results.filter(r => !shown.has(r.id) && (!onlyTheme || r.theme === th)); $('labHist').innerHTML = rs.map(labCard).join('') || '<div class="note">No earlier results' + (onlyTheme ? ' for this theme' : '') + '.</div>'; wireCards($('labHist')); renderRefs(); }
   $('labOnlyTheme').onchange = renderHist;
+  async function labClear(scope) { const th = STATE.themes.find(x => x.slug === $('tTheme').value); const what = scope === 'all' ? 'ALL lab results' : `the lab results for ${th ? th.name : 'this theme'}`; if (!confirm(`Delete ${what}${$('labKeepApplied').checked ? ' (except ones marked in use)' : ''}? The test images are removed for good.`)) return;
+    const r = await api('/api/admin/lab-clear', { method: 'POST', json: { scope, theme: $('tTheme').value, keepApplied: $('labKeepApplied').checked } }); $('labOut').innerHTML = ''; $('tMsg').textContent = ''; LAB.ref = null; $('tPhotoNote').textContent = ''; await loadLab(); toast(`${r.n} result${r.n === 1 ? '' : 's'} cleared`); }
+  $('labClearTheme').onclick = () => labClear('theme'); $('labClearAll').onclick = () => labClear('all');
   async function loadLab() { try { const d = await api('/api/admin/lab'); LAB.results = d.results; LAB.hidden = d.hiddenRefs || []; } catch (_) { LAB.results = []; } const ids = new Set(Array.from($('labOut').querySelectorAll('.lab')).map(d => d.dataset.id)); $('labOut').innerHTML = LAB.results.filter(r => ids.has(r.id)).map(labCard).join(''); wireCards($('labOut')); renderHist(); }
   $('tRun').onclick = async () => {
     const models = Array.from(document.querySelectorAll('#tModelBoxes input:checked')).map(i => i.value); const f = $('tPhoto').files[0];
