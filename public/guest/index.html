@@ -168,6 +168,9 @@
   const show = id => { for (const s of screens) $(s).classList.toggle('on', s === id); document.querySelector('main').classList.toggle('cam-mode', id === 's-cam'); setTimeout(() => { if (typeof bump === 'function') bump(); }, 0); };
   const S = { themes: [], theme: null, who: null, g: {}, blob: null, job: null, stream: null };
   const LABEL = { male: 'Male', female: 'Female' };
+  // which iPad this is: /?pad=Front&bot=2 pins a name (shown in the admin queue) and, optionally, the robot its guests go to. Remembered on this iPad.
+  const Q = new URLSearchParams(location.search); if (Q.has('pad')) localStorage.setItem('sketchy.pad', Q.get('pad')); if (Q.has('bot')) localStorage.setItem('sketchy.padBot', Q.get('bot'));
+  const PAD = localStorage.getItem('sketchy.pad') || '', PAD_BOT = +localStorage.getItem('sketchy.padBot') || 0;
 
   fetch('logo.svg').then(r => r.text()).then(t => { const m = t.match(/<svg[^>]*>([\s\S]*)<\/svg>/); if (m) document.querySelector('header .logo').innerHTML = m[1]; }).catch(() => {});
 
@@ -290,7 +293,7 @@
   const _origShow = show; // keep idle timer in sync with screen changes
   $('send').onclick = async () => {
     $('send').disabled = true; $('send').textContent = 'Sending…';
-    const fd = new FormData(); fd.append('photo', S.blob, 'photo.jpg'); fd.append('theme', S.theme.slug); fd.append('variant', variantKey()); for (const [k, f] of [['a', 'name1'], ['b', 'name2'], ['pet', 'petName']]) if (S.names && S.names[k]) fd.append(f, S.names[k]);
+    const fd = new FormData(); fd.append('photo', S.blob, 'photo.jpg'); fd.append('theme', S.theme.slug); fd.append('variant', variantKey()); if (PAD) fd.append('pad', PAD); if (PAD_BOT) fd.append('bot', PAD_BOT); for (const [k, f] of [['a', 'name1'], ['b', 'name2'], ['pet', 'petName']]) if (S.names && S.names[k]) fd.append(f, S.names[k]);
     try {
       const r = await fetch('/api/jobs', { method: 'POST', body: fd }); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status);
       S.job = j; S.cdTimer = null; S.cdText = ''; closeCam(); show('s-status'); poll();
