@@ -20,5 +20,7 @@ async def main():
         print('run:', await pg.text_content('#ltMsg'), '| rows:', len(await pg.query_selector_all('#ltGrid .bRow')), '| cards:', len(await pg.query_selector_all('#ltGrid .lab')))
         await (await pg.query_selector('#ltGrid button[data-apply]')).click(); await pg.wait_for_timeout(1200); print('use this:', await pg.text_content('#toast'))
         await pg.reload(); await pg.wait_for_timeout(1500); await pg.click('#nav [data-t=test]'); await pg.wait_for_timeout(500); print('slots remembered after reload:', len(await pg.query_selector_all('#ltSlots .slot.has')))
+        api('/api/admin/themes', {'name': 'Zebra'}); await pg.click('#nav [data-t=queue]'); await pg.wait_for_timeout(6000); await pg.click('#nav [data-t=test]'); await pg.select_option('#ltTheme', 'zebra'); await pg.wait_for_timeout(300); await pg.click('#nav [data-t=queue]'); await pg.wait_for_timeout(6000); await pg.click('#nav [data-t=test]'); print('theme after tab switch + refresh:', await pg.input_value('#ltTheme'))
+        await pg.reload(); await pg.wait_for_timeout(1500); await pg.click('#nav [data-t=test]'); await pg.wait_for_timeout(400); print('theme after reload:', await pg.input_value('#ltTheme'))
         print('ERRORS:', errs or 'none'); await br.close()
 asyncio.run(main())

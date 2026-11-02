@@ -295,12 +295,12 @@
   // ----- test -----
   // ----- Prompt Lab -----
   let LAB = { results: [], ref: null, hidden: [] }; // ref: lab job id whose photo to reuse
-  function renderTest() { if (typeof ltLoad === 'function' && LT.refs) { const c = $('ltTheme').value; $('ltTheme').innerHTML = STATE.themes.map(t => `<option value="${t.slug}">${t.name}${t.enabled === false ? ' (inactive)' : ''}${t.rating === 'adult' ? ' · 18+' : ''}</option>`).join(''); if (c) $('ltTheme').value = c; } const cur = $('tTheme').value; $('tTheme').innerHTML = STATE.themes.map(t => `<option value="${t.slug}">${t.name}${t.enabled === false ? ' (inactive)' : ''}</option>`).join(''); if (cur) $('tTheme').value = cur; fillVars(); }
+  function renderTest() { if (typeof ltFillThemes === 'function') ltFillThemes(); const cur = $('tTheme').value; $('tTheme').innerHTML = STATE.themes.map(t => `<option value="${t.slug}">${t.name}${t.enabled === false ? ' (inactive)' : ''}</option>`).join(''); const want = cur || localStorage.getItem('sketchy.tTheme'); if (want && STATE.themes.some(t => t.slug === want)) $('tTheme').value = want; fillVars(); }
   function fillVars() { const t = STATE.themes.find(x => x.slug === $('tTheme').value); const cur = $('tVar').value; $('tVar').innerHTML = STATE.variantOrder.map(v => `<option value="${v}">${STATE.variants[v]}${t && !t.prompts[v].trim() ? ' (no prompt yet)' : ''}</option>`).join(''); if (cur) $('tVar').value = cur; boxState(); }
   function boxState() { const t = STATE.themes.find(x => x.slug === $('tTheme').value); if (!t) return; const v = $('tVar').value, vm = t.variantModels[v] || {}; $('tBoxState').textContent = t.prompts[v].trim() ? `saved: ${t.prompts[v].length} chars · model ${vm.model || t.model || 'Settings'}` : 'nothing saved yet for this combination'; if (!$('tPrompt').value.trim()) $('tPrompt').value = t.prompts[v] || ''; cnt(); renderHist(); }
   const cnt = () => $('tPromptCnt').textContent = $('tPrompt').value.length + ' chars';
   $('tPrompt').oninput = cnt;
-  $('tTheme').onchange = () => { $('tPrompt').value = ''; fillVars(); }; $('tVar').onchange = () => { $('tPrompt').value = ''; boxState(); };
+  $('tTheme').onchange = () => { localStorage.setItem('sketchy.tTheme', $('tTheme').value); $('tPrompt').value = ''; fillVars(); }; $('tVar').onchange = () => { $('tPrompt').value = ''; boxState(); };
   $('tPromptLoad').onclick = () => { const t = STATE.themes.find(x => x.slug === $('tTheme').value); if (t) { $('tPrompt').value = t.prompts[$('tVar').value] || ''; cnt(); } };
   $('tAll').onclick = () => document.querySelectorAll('#tModelBoxes input').forEach(i => i.checked = true);
   $('tNone').onclick = () => document.querySelectorAll('#tModelBoxes input').forEach(i => i.checked = false);
@@ -374,9 +374,10 @@
   // ----- Lab: whole-theme test -----
   const LT = { refs: [], slots: {}, picked: null, grid: [] };
   function ltKey() { return 'sketchy.ltSlots.' + $('ltTheme').value; }
-  async function ltLoad() { try { LT.refs = (await api('/api/admin/refs')).refs; } catch (_) { LT.refs = []; } const cur = $('ltTheme').value; $('ltTheme').innerHTML = STATE.themes.map(t => `<option value="${t.slug}">${t.name}${t.enabled === false ? ' (inactive)' : ''}${t.rating === 'adult' ? ' · 18+' : ''}</option>`).join(''); if (cur) $('ltTheme').value = cur; ltTheme(); }
+  function ltFillThemes() { const sel = $('ltTheme'); const want = sel.value || localStorage.getItem('sketchy.ltTheme') || ''; const html = STATE.themes.map(t => `<option value="${t.slug}">${t.name}${t.enabled === false ? ' (inactive)' : ''}${t.rating === 'adult' ? ' · 18+' : ''}</option>`).join(''); if (sel.innerHTML !== html) sel.innerHTML = html; if (want && STATE.themes.some(t => t.slug === want)) sel.value = want; }
+  async function ltLoad() { try { LT.refs = (await api('/api/admin/refs')).refs; } catch (_) { LT.refs = []; } ltFillThemes(); ltTheme(); }
   function ltTheme() { try { LT.slots = JSON.parse(localStorage.getItem(ltKey()) || '{}'); } catch (_) { LT.slots = {}; } const t = STATE.themes.find(x => x.slug === $('ltTheme').value); $('ltInfo').textContent = t ? `${STATE.variantOrder.filter(v => t.prompts[v].trim()).length} of 8 combinations have a prompt` : ''; ltRenderLib(); ltRenderSlots(); ltRenderGrid(); }
-  $('ltTheme').onchange = ltTheme;
+  $('ltTheme').onchange = () => { localStorage.setItem('sketchy.ltTheme', $('ltTheme').value); ltTheme(); };
   function ltRenderLib() { $('ltLib').innerHTML = LT.refs.map(r => `<div class="ref ${LT.picked === r.id ? 'on' : ''}" data-id="${r.id}"><img src="/api/admin/refs/${r.id}?token=${encodeURIComponent(TOKEN)}"><button class="x" title="remove from library">✕</button></div>`).join('') || '<span class="note">none yet</span>';
     $('ltLib').querySelectorAll('.ref').forEach(el => { el.querySelector('img').onclick = () => { LT.picked = LT.picked === el.dataset.id ? null : el.dataset.id; ltRenderLib(); }; el.querySelector('.x').onclick = async () => { await api('/api/admin/refs/' + el.dataset.id, { method: 'DELETE' }); LT.refs = LT.refs.filter(r => r.id !== el.dataset.id); ltRenderLib(); }; }); }
   async function ltAddRef(file) { const fd = new FormData(); fd.append('photo', file); const r = await api('/api/admin/refs', { method: 'POST', body: fd }); if (!LT.refs.some(x => x.id === r.id)) LT.refs.unshift({ id: r.id }); return r.id; }
