@@ -58,7 +58,7 @@ const OPENAI_BASE = process.env.OPENAI_BASE || 'https://api.openai.com';
 
 // ---------- settings ----------
 const SETTINGS_FILE = path.join(DATA, 'settings.json');
-const DEFAULT_SETTINGS = { model: 'gpt-image-2-2026-04-21', quality: 'medium', size: '1024x1536', moderation: 'low', bots: 1, concurrency: 2, autoRun: true, pauseBetween: true, eventName: 'Sketchy Robotics', cameraZoom: 1.6 };
+const DEFAULT_SETTINGS = { model: 'gpt-image-2-2026-04-21', quality: 'medium', size: '1024x1536', moderation: 'low', bots: 1, concurrency: 2, textModel: 'gpt-4.1-mini', foundations: [{ id: 'normal', name: 'Normal', text: '' }, { id: 'bighead', name: 'Big head', text: '' }], autoRun: true, pauseBetween: true, eventName: 'Sketchy Robotics', cameraZoom: 1.6 };
 function getSettings() { try { return Object.assign({}, DEFAULT_SETTINGS, JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))); } catch (_) { return Object.assign({}, DEFAULT_SETTINGS); } }
 function saveSettings(s) { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2)); persist(SETTINGS_FILE); }
 
@@ -241,7 +241,7 @@ app.post('/api/jobs/:id/status', (req, res) => { const j = jobs.get(req.params.i
 // ----- admin -----
 app.post('/api/admin/login', (req, res) => { if ((req.body.password || '') === ADMIN_PASSWORD) res.json({ ok: true, token: ADMIN_PASSWORD }); else res.status(401).json({ error: 'wrong password' }); });
 app.get('/api/admin/state', adminAuth, (req, res) => res.json({ settings: getSettings(), themes: listThemes(), variants: VARIANT_LABELS, variantOrder: VARIANTS, jobs: sortedJobs().filter(j => !j.test).slice(-200).map(j => Object.assign(publicJob(j), { guestName: j.guestName, priority: j.priority })), hasKey: !!OPENAI_KEY, durable: !!bucket, readOnly: !!bucket && !IS_DEPLOYMENT }));
-app.post('/api/admin/settings', adminAuth, (req, res) => { const body = req.body || {}; const allowed = ['model', 'quality', 'size', 'moderation', 'concurrency', 'eventName', 'cameraZoom', 'bots']; const s = getSettings(); for (const k of allowed) if (k in body) s[k] = body[k]; saveSettings(s); res.json(Object.assign({ ok: true, durable: !!bucket && IS_DEPLOYMENT }, s)); });
+app.post('/api/admin/settings', adminAuth, (req, res) => { const body = req.body || {}; const allowed = ['model', 'quality', 'size', 'moderation', 'concurrency', 'eventName', 'cameraZoom', 'bots', 'textModel', 'foundations']; const s = getSettings(); for (const k of allowed) if (k in body) s[k] = body[k]; saveSettings(s); res.json(Object.assign({ ok: true, durable: !!bucket && IS_DEPLOYMENT }, s)); });
 app.post('/api/admin/themes', adminAuth, (req, res) => { const name = String(req.body.name || '').trim(); if (!name) return res.status(400).json({ error: 'name required' }); let slug = slugify(name); if (readTheme(slug)) slug += '-' + Date.now().toString(36); writeTheme(slug, { name, enabled: true, order: listThemes().length + 1, prompts: {} }); res.json(readTheme(slug)); });
 app.put('/api/admin/themes/:slug', adminAuth, (req, res) => { const t = readTheme(slugify(req.params.slug)); if (!t) return res.status(404).end(); writeTheme(t.slug, Object.assign(t, req.body, { prompts: Object.assign(t.prompts, req.body.prompts || {}), variantModels: Object.assign(t.variantModels, req.body.variantModels || {}) })); res.json(readTheme(t.slug)); });
 app.delete('/api/admin/themes/:slug', adminAuth, (req, res) => { const d = path.join(THEMES, slugify(req.params.slug)); if (fs.existsSync(d)) { fs.rmSync(d, { recursive: true }); unpersist(d); } res.json({ ok: true }); });
@@ -251,9 +251,32 @@ app.get('/api/admin/models', adminAuth, async (req, res) => {
   try {
     if (!modelCache || Date.now() - modelCache.at > 3600e3) {
       const r = await fetch(OPENAI_BASE + '/v1/models', { headers: { Authorization: 'Bearer ' + OPENAI_KEY } }); const j = await r.json(); if (!r.ok) throw new Error(j.error && j.error.message || r.status);
-      modelCache = { models: (j.data || []).map(m => m.id).filter(id => /image/i.test(id)).sort(), at: Date.now() };
+      const ids = (j.data || []).map(m => m.id); modelCache = { models: ids.filter(id => /image/i.test(id)).sort(), text: ids.filter(id => /^(gpt-4|gpt-5|o[1-9]|chatgpt-4)/.test(id) && !/image|audio|realtime|tts|transcribe|search|embedding|moderation/.test(id)).sort(), at: Date.now() };
     }
-    res.json({ models: modelCache.models }); } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ models: modelCache.models, text: modelCache.text }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// ----- AI prompt writer: a non-negotiable foundation (verbatim) + a theme section written by a text model from the operator's description -----
+async function chat(model, system, user, maxTokens) {
+  const body = { model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }; if (!/^o[1-9]|^gpt-5/.test(model)) body.temperature = 0.8;
+  const r = await fetch(OPENAI_BASE + '/v1/chat/completions', { method: 'POST', headers: { Authorization: 'Bearer ' + OPENAI_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error('OpenAI ' + r.status + ': ' + (j.error && j.error.message || '').slice(0, 300)); return ((j.choices || [])[0] || {}).message?.content?.trim() || '';
+}
+const WRITER_SYSTEM = `You write prompts for an AI image-editing model that turns a guest's selfie into black-and-white line art which a pen plotter then draws on paper at an event.
+You are given a FOUNDATION: fixed, non-negotiable instructions that will be placed verbatim at the top of the final prompt. Do NOT repeat, paraphrase, weaken or contradict anything in it.
+Your job is to write only the THEME SECTION that follows it: the costume/outfit, props, hair/accessory treatment, pose and positioning, expression, body details and setting for the requested combination of people, based on the operator's description. Match the foundation's tone and level of detail. Be concrete and visual (what is worn, held, where things are), avoid vague adjectives, keep it to one tightly written paragraph or a short list of sentences, and never mention text, logos, watermarks, colours or shading (the output must stay clean line art). Respect the combination exactly: for two people say who is on the LEFT and who is on the RIGHT; for person + pet describe the pet's treatment too.
+Output ONLY the theme section text, no heading, no preamble, no quotes.`;
+app.post('/api/admin/writer', adminAuth, async (req, res) => {
+  try {
+    if (!OPENAI_KEY) throw new Error('OPENAI_API_KEY is not set'); const st = getSettings(); const model = String(req.body.model || st.textModel || 'gpt-4.1-mini');
+    const fid = String(req.body.foundation || ''); const f = (st.foundations || []).find(x => x.id === fid) || { name: 'none', text: '' };
+    const desc = String(req.body.description || '').trim(); if (!desc) return res.status(400).json({ error: 'describe the theme first' });
+    const variants = (Array.isArray(req.body.variants) ? req.body.variants : [req.body.variant]).filter(v => VARIANTS.includes(v)); if (!variants.length) return res.status(400).json({ error: 'pick a combination' });
+    const themeName = String(req.body.themeName || '').trim(); const extra = String(req.body.extra || '').trim();
+    const results = await Promise.all(variants.map(async v => {
+      const user = `FOUNDATION (already in the prompt, do not repeat):\n${f.text || '(none)'}\n\nTHEME NAME: ${themeName || '(untitled)'}\nCOMBINATION: ${VARIANT_LABELS[v]}\nOPERATOR'S DESCRIPTION OF THE THEME: ${desc}${extra ? '\nEXTRA RULES FOR THIS THEME: ' + extra : ''}\n\nWrite the theme section now.`;
+      try { const part = await chat(model, WRITER_SYSTEM, user, 900); return { variant: v, label: VARIANT_LABELS[v], part, prompt: (f.text ? f.text.trim() + '\n\n' : '') + part }; } catch (e) { return { variant: v, label: VARIANT_LABELS[v], error: e.message }; } }));
+    res.json({ ok: true, model, foundation: f.name, results });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // ----- Prompt Lab: one reference photo, one prompt, several models at once; a result can be applied to a theme/combination -----
 app.post('/api/admin/lab', adminAuth, upload.single('photo'), async (req, res) => {

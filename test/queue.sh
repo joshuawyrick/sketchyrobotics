@@ -2,7 +2,7 @@
 # Auto-run queue robustness: 3 jobs, pause off, canvas cleared between, reload mid-run resumes + requeues. Run: bash test/queue.sh
 cd "$(dirname "$0")/.."
 fuser -k 3456/tcp 9999/tcp >/dev/null 2>&1; sleep 0.5
-node test/fakeai.js /home/claude/dexdraw/test/face.png > test/fake.log 2>&1 &
+node ${FAKE:-test/fakeai.js} /home/claude/dexdraw/test/face.png > test/fake.log 2>&1 &
 rm -rf /tmp/sketchy-q
 DATA_DIR=/tmp/sketchy-q OPENAI_BASE=http://localhost:9999 OPENAI_API_KEY=k ADMIN_PASSWORD=pw PORT=3456 node server/index.js > test/srv.log 2>&1 &
 sleep 2

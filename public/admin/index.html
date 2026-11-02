@@ -24,6 +24,8 @@
   .theme.on{outline:3px solid var(--blue)}
   .row{display:flex;gap:10px;align-items:center;margin:8px 0;flex-wrap:wrap}.row label{min-width:170px;color:var(--mut)}
   .botStrip{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}.botCard{flex:1;min-width:120px;border:2px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12.5px;display:flex;flex-direction:column;gap:2px;opacity:.7}.botCard b{color:var(--c);font-size:14px}.botCard.on{opacity:1;border-color:var(--c)}
+  .writer{border:1px dashed var(--line);border-radius:12px;padding:10px 12px;margin:10px 0;background:#fafbfe}
+  .wItem{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-top:8px;background:#fff}.wItem h4{margin:0 0 4px;font-size:13px}.wItem textarea{width:100%;min-height:90px;font-size:12.5px}
   .labGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-top:12px}
   .lab{border:1px solid var(--line);border-radius:12px;background:#fff;overflow:hidden;display:flex;flex-direction:column}.lab img{width:100%;aspect-ratio:2/3;object-fit:contain;background:#fff;display:block}.lab .b{padding:8px 10px;font-size:12.5px;display:flex;flex-direction:column;gap:6px}.lab .m{font-weight:700}.lab .p{color:var(--mut);max-height:3.9em;overflow:hidden;white-space:pre-wrap}.lab.applied{outline:3px solid #1a9c4c}.lab .fail{padding:14px;color:#b51f33;font-size:12.5px}
   .modelBoxes{display:flex;flex-wrap:wrap;gap:6px 14px}.modelBoxes label{display:flex;gap:6px;align-items:center;font-size:13px;white-space:nowrap}
@@ -43,7 +45,7 @@
 </head>
 <body>
 <header><svg class="logo" viewBox="60 150 1870 400"></svg><span class="t">Admin</span>
-  <nav id="nav"><button data-t="queue" class="on">Queue</button><button data-t="themes">Themes</button><button data-t="test">Prompt Lab</button><button data-t="settings">Settings</button><a href="/studio" target="_blank"><button>Open Plotter Studio ↗</button></a></nav></header>
+  <nav id="nav"><button data-t="queue" class="on">Queue</button><button data-t="themes">Themes</button><button data-t="test">Prompt Lab</button><button data-t="foundations">Foundations</button><button data-t="settings">Settings</button><a href="/studio" target="_blank"><button>Open Plotter Studio ↗</button></a></nav></header>
 <main>
   <div class="login card" id="login"><h2>Admin password</h2><input type="password" id="pw" placeholder="password"><div class="row" style="margin-top:10px"><button class="primary" id="loginBtn">Sign in</button><span id="loginErr" class="bad"></span></div></div>
 
@@ -88,6 +90,15 @@
       <div class="row"><label>Theme</label><select id="tTheme" style="max-width:280px"></select><span class="note">New themes start inactive — guests only see a theme once you tick Enabled in Themes.</span></div>
       <div class="row"><label>Combination</label><select id="tVar" style="max-width:280px"></select><span class="note" id="tBoxState"></span></div>
       <div class="row" style="align-items:flex-start"><label>Reference photo</label><div style="flex:1"><input type="file" id="tPhoto" accept="image/*"> <span class="note" id="tPhotoNote"></span><div id="refStrip" class="refStrip"></div></div></div>
+      <div class="writer" id="writer">
+        <h3 style="margin:0 0 6px;font-size:14px">AI prompt writer <span class="note">describe the theme; the foundation's no-compromise rules go in verbatim, the AI adds outfit, pose, props and body details for the combination</span></h3>
+        <div class="row"><label>Foundation</label><select id="wFound" style="max-width:260px"></select><a href="#" id="wEditFound" class="note">edit foundations ↗</a>
+          <label style="width:auto;margin-left:14px">Text model</label><select id="wModel" style="max-width:220px"></select></div>
+        <div class="row" style="align-items:flex-start"><label>Describe the theme</label><textarea id="wDesc" style="flex:1;min-height:70px" placeholder="e.g. 1980s glam-metal rockstar: big teased hair, leather jacket with studs, bandana, holding a Flying-V guitar, stage pose, confident grin"></textarea></div>
+        <div class="row"><label>Extra rules (optional)</label><input id="wExtra" style="flex:1" placeholder="e.g. keep the guest's own hairstyle; no sunglasses; pet wears a tiny matching bandana"></div>
+        <div class="row"><button class="primary" id="wOne">Write prompt for this combination</button><button id="wAll">Write all 8 combinations</button><span id="wMsg" class="note"></span></div>
+        <div id="wAllOut" style="display:none"></div>
+      </div>
       <div class="row" style="align-items:flex-start"><label>Prompt</label><div style="flex:1"><textarea id="tPrompt" style="width:100%;min-height:150px" placeholder="Write the master prompt here. It is applied to the reference photo exactly as the guest's photo will be."></textarea><div class="note"><span id="tPromptCnt"></span> <button id="tPromptLoad" style="padding:2px 8px;min-height:0;font-size:12px">Load the saved prompt for this combination</button></div></div></div>
       <div class="row" style="align-items:flex-start"><label>Models</label><div style="flex:1"><div id="tModelBoxes" class="modelBoxes"></div><div class="note"><button id="tAll" style="padding:2px 8px;min-height:0;font-size:12px">All</button> <button id="tNone" style="padding:2px 8px;min-height:0;font-size:12px">None</button> <button id="tModels" style="padding:2px 8px;min-height:0;font-size:12px">Refresh list from my key</button></div></div></div>
       <div class="row"><label>Quality</label><select id="tQuality" style="max-width:200px"><option value="">(use Settings)</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="auto">auto</option></select>
@@ -101,6 +112,14 @@
     </div>
   </section>
 
+  <section class="tab" id="tab-foundations">
+    <div class="card"><h2>Master foundations <span class="note">no-compromise instructions placed verbatim at the top of every prompt the AI writer produces</span></h2>
+      <p class="note">Keep these to the rules that must never bend: line-art style, likeness, paper/pen constraints, what to never draw. Theme-specific styling (outfits, props, pose) is what the writer adds per theme. "Normal" is for standard proportions; "Big head" for caricature themes. You can add more.</p>
+      <div id="foundList"></div>
+      <div class="row"><button id="foundAdd">+ Add a foundation</button><button class="primary" id="foundSave">Save foundations</button><span id="foundMsg" class="ok"></span></div>
+    </div>
+  </section>
+
   <section class="tab" id="tab-settings">
     <div class="card"><h2>OpenAI</h2>
       <div class="row"><label>Durable storage</label><span id="durState"></span><span class="note">Replit Object Storage keeps themes, prompts and sketches across redeploys. Add a bucket in Replit's Object Storage tool if this says missing.</span></div>
@@ -109,6 +128,7 @@
       <div class="row"><label>Quality</label><select id="sQuality" style="max-width:200px"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="auto">auto</option></select></div>
       <div class="row"><label>Output size</label><select id="sSize" style="max-width:200px"><option value="1024x1536">1024×1536 portrait</option><option value="1024x1024">1024×1024 square</option><option value="1536x1024">1536×1024 landscape</option><option value="auto">auto</option></select></div>
       <div class="row"><label>Content moderation</label><select id="sMod" style="max-width:200px"><option value="low">low (less restrictive) — default</option><option value="auto">auto (OpenAI's standard filter)</option></select><span class="note">"low" loosens the image filter for themes like zombies or horror; outright refusals still come back as a failed job with the reason.</span></div>
+      <div class="row"><label>Prompt-writer text model</label><select id="sTextModel" style="max-width:260px"></select><span class="note">Used only by the Lab's AI prompt writer. gpt-4.1-mini is fast and cheap; gpt-4.1 / gpt-5 write richer prompts.</span></div>
       <div class="row"><label>Robots at this event</label><input id="sBots" type="number" min="1" max="8" step="1" style="max-width:100px"><span class="note">One Plotter Studio tab per robot (open /studio/?bot=2, ?bot=3…). Sketches are handed to the robot with the least waiting, and the iPad tells the guest which robot to go to.</span></div>
       <div class="row"><label>Photos processed at once</label><input type="number" id="sConc" min="1" max="5" style="max-width:100px"></div>
     </div>
@@ -284,11 +304,36 @@
     const ticked = new Set(Array.from(document.querySelectorAll('#tModelBoxes input:checked')).map(i => i.value)); if (!ticked.size) ticked.add(saved);
     $('tModelBoxes').innerHTML = list.map(m => `<label><input type="checkbox" value="${m}" ${ticked.has(m) ? 'checked' : ''}> ${m}</label>`).join('');
   }
-  async function loadModels(show) { try { const r = await api('/api/admin/models'); MODELS = Array.isArray(r.models) && r.models.length ? r.models : KNOWN_MODELS; fillModels(); if (show) $('tMsg').textContent = r.models.length + ' image models available'; } catch (e) { if (show) $('tMsg').textContent = e.message; } }
+  let TEXT_MODELS = ['gpt-4.1-mini', 'gpt-4.1', 'gpt-4o-mini', 'gpt-4o', 'gpt-5-mini', 'gpt-5'];
+  function fillTextModels() { const saved = (STATE.settings && STATE.settings.textModel) || 'gpt-4.1-mini'; const list = Array.from(new Set(TEXT_MODELS.concat([saved]))).sort(); const opts = list.map(m => `<option value="${m}">${m}</option>`).join(''); $('sTextModel').innerHTML = opts; $('sTextModel').value = saved; const w = $('wModel').value; $('wModel').innerHTML = '<option value="">(use Settings)</option>' + opts; $('wModel').value = list.includes(w) ? w : ''; }
+  async function loadModels(show) { try { const r = await api('/api/admin/models'); MODELS = Array.isArray(r.models) && r.models.length ? r.models : KNOWN_MODELS; if (Array.isArray(r.text) && r.text.length) TEXT_MODELS = r.text; fillModels(); fillTextModels(); if (show) $('tMsg').textContent = r.models.length + ' image models available'; } catch (e) { if (show) $('tMsg').textContent = e.message; } }
   $('tModels').onclick = async () => { $('tModels').disabled = true; await loadModels(true); $('tModels').disabled = false; };
+  // ----- foundations -----
+  function renderFoundations() { const fs = STATE.settings.foundations || []; $('foundList').innerHTML = fs.map((f, i) => `<div class="wItem" data-i="${i}"><div class="row"><label>Name</label><input class="fName" value="${(f.name || '').replace(/"/g, '&quot;')}" style="max-width:260px"><button class="fDel danger" style="margin-left:auto">✕</button></div><textarea class="fText" placeholder="Paste the master prompt rules here">${(f.text || '').replace(/</g, '&lt;')}</textarea><div class="note"><span class="fCnt"></span></div></div>`).join('') || '<div class="note">No foundations yet.</div>';
+    $('foundList').querySelectorAll('.wItem').forEach(d => { const ta = d.querySelector('.fText'), c = d.querySelector('.fCnt'); const up = () => c.textContent = ta.value.length + ' chars'; ta.oninput = up; up(); d.querySelector('.fDel').onclick = () => { if (!confirm('Remove this foundation?')) return; STATE.settings.foundations.splice(+d.dataset.i, 1); renderFoundations(); }; });
+    fillFoundSel(); }
+  function readFoundations() { return Array.from($('foundList').querySelectorAll('.wItem')).map((d, i) => { const name = d.querySelector('.fName').value.trim() || 'Foundation ' + (i + 1); const old = (STATE.settings.foundations || [])[i] || {}; return { id: old.id || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'f' + i, name, text: d.querySelector('.fText').value }; }); }
+  $('foundAdd').onclick = () => { STATE.settings.foundations = readFoundations(); STATE.settings.foundations.push({ id: 'f' + Date.now().toString(36), name: 'New foundation', text: '' }); renderFoundations(); };
+  $('foundSave').onclick = async () => { try { const foundations = readFoundations(); await api('/api/admin/settings', { method: 'POST', json: { foundations } }); STATE.settings.foundations = foundations; $('foundMsg').textContent = 'Saved ✓'; toast('Foundations saved'); setTimeout(() => $('foundMsg').textContent = '', 4000); fillFoundSel(); } catch (e) { toast('Save failed: ' + e.message, 'bad'); } };
+  function fillFoundSel() { const cur = $('wFound').value; const fs = STATE.settings.foundations || []; $('wFound').innerHTML = fs.map(f => `<option value="${f.id}">${f.name}${f.text && f.text.trim() ? '' : ' (empty)'}</option>`).join('') + '<option value="">(no foundation)</option>'; if (cur && fs.some(f => f.id === cur)) $('wFound').value = cur; }
+  $('wEditFound').onclick = e => { e.preventDefault(); document.querySelector('#nav [data-t=foundations]').click(); };
+  // ----- AI prompt writer -----
+  function writerBody(variants) { const t = STATE.themes.find(x => x.slug === $('tTheme').value); return { foundation: $('wFound').value, model: $('wModel').value || undefined, description: $('wDesc').value, extra: $('wExtra').value, themeName: t ? t.name : '', variants }; }
+  $('wOne').onclick = async () => { if (!$('wDesc').value.trim()) return toast('Describe the theme first', 'bad'); $('wOne').disabled = $('wAll').disabled = true; $('wMsg').textContent = 'Writing…';
+    try { const r = await api('/api/admin/writer', { method: 'POST', json: writerBody([$('tVar').value]) }); const x = r.results[0]; if (x.error) throw new Error(x.error); $('tPrompt').value = x.prompt; cnt(); $('wMsg').textContent = `Written with ${r.model} on the "${r.foundation}" foundation — edit if you like, then Generate below.`; $('tPrompt').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+    catch (e) { $('wMsg').textContent = ''; toast('Writer failed: ' + e.message, 'bad'); } $('wOne').disabled = $('wAll').disabled = false; };
+  $('wAll').onclick = async () => { if (!$('wDesc').value.trim()) return toast('Describe the theme first', 'bad'); $('wOne').disabled = $('wAll').disabled = true; $('wMsg').textContent = 'Writing all 8 (they run at the same time)…';
+    try { const r = await api('/api/admin/writer', { method: 'POST', json: writerBody(STATE.variantOrder) }); const t = STATE.themes.find(x => x.slug === $('tTheme').value);
+      $('wAllOut').style.display = ''; $('wAllOut').innerHTML = `<div class="note" style="margin-top:8px">Review, edit anything, then apply. Applying replaces the prompt in each ticked box of <b>${t ? t.name : 'the theme'}</b>.</div>` + r.results.map(x => `<div class="wItem"><h4><label><input type="checkbox" class="wPick" data-v="${x.variant}" ${x.error ? '' : 'checked'}> ${x.label}</label>${x.error ? ` <span class="bad">✗ ${x.error}</span>` : ''}</h4>${x.error ? '' : `<textarea class="wText" data-v="${x.variant}">${x.prompt.replace(/</g, '&lt;')}</textarea>`}</div>`).join('') + `<div class="row" style="margin-top:8px"><button class="primary" id="wApply">Apply ticked prompts to ${t ? t.name : 'theme'}</button><button id="wDiscard">Discard</button></div>`;
+      $('wMsg').textContent = `${r.results.filter(x => !x.error).length} of 8 written with ${r.model}.`;
+      $('wDiscard').onclick = () => { $('wAllOut').style.display = 'none'; $('wAllOut').innerHTML = ''; };
+      $('wApply').onclick = async () => { const prompts = {}; $('wAllOut').querySelectorAll('.wPick:checked').forEach(c => { const ta = $('wAllOut').querySelector(`.wText[data-v="${c.dataset.v}"]`); if (ta) prompts[c.dataset.v] = ta.value; }); if (!Object.keys(prompts).length) return;
+        const existing = t ? Object.keys(prompts).filter(v => t.prompts[v] && t.prompts[v].trim()) : []; if (existing.length && !confirm(`${t.name} already has prompts for: ${existing.map(v => STATE.variants[v]).join(', ')}. Replace them?`)) return;
+        try { await api('/api/admin/themes/' + $('tTheme').value, { method: 'PUT', json: { prompts } }); toast(`${Object.keys(prompts).length} prompts saved to ${t.name}`); $('wAllOut').style.display = 'none'; $('wAllOut').innerHTML = ''; await refresh(); boxState(); } catch (e) { toast('Apply failed: ' + e.message, 'bad'); } };
+    } catch (e) { $('wMsg').textContent = ''; toast('Writer failed: ' + e.message, 'bad'); } $('wOne').disabled = $('wAll').disabled = false; };
   // ----- settings -----
-  function renderSettings() { const s = STATE.settings; $('durState').innerHTML = STATE.readOnly ? '<span class="bad">⚠ dev workspace — changes here are NOT saved to the live app</span>' : STATE.durable ? '<span class="ok">✓ bucket connected — saved settings and themes persist across redeploys</span>' : '<span class="bad">✗ local disk only</span>'; $('keyState').innerHTML = STATE.hasKey ? '<span class="ok">✓ set</span>' : '<span class="bad">✗ missing</span>'; fillModels(); $('sQuality').value = s.quality; $('sSize').value = s.size; $('sMod').value = s.moderation || 'low'; $('sBots').value = s.bots || 1; $('sConc').value = s.concurrency; $('sEvent').value = s.eventName || ''; $('sZoom').value = s.cameraZoom || 1.6; }
-  $('sSave').onclick = async () => { await api('/api/admin/settings', { method: 'POST', json: { model: $('sModel').value, quality: $('sQuality').value, size: $('sSize').value, moderation: $('sMod').value, bots: Math.max(1, Math.min(8, +$('sBots').value || 1)), concurrency: +$('sConc').value || 1, eventName: $('sEvent').value, cameraZoom: Math.min(3, Math.max(1, +$('sZoom').value || 1.6)) } }); $('sMsg').textContent = 'Saved ✓'; toast(STATE.readOnly ? 'Saved on this test server only — not the live app' : 'Settings saved', STATE.readOnly ? 'bad' : 'ok'); setTimeout(() => $('sMsg').textContent = '', 4000); };
+  function renderSettings() { const s = STATE.settings; $('durState').innerHTML = STATE.readOnly ? '<span class="bad">⚠ dev workspace — changes here are NOT saved to the live app</span>' : STATE.durable ? '<span class="ok">✓ bucket connected — saved settings and themes persist across redeploys</span>' : '<span class="bad">✗ local disk only</span>'; $('keyState').innerHTML = STATE.hasKey ? '<span class="ok">✓ set</span>' : '<span class="bad">✗ missing</span>'; fillModels(); $('sQuality').value = s.quality; $('sSize').value = s.size; $('sMod').value = s.moderation || 'low'; $('sBots').value = s.bots || 1; fillTextModels(); renderFoundations(); $('sConc').value = s.concurrency; $('sEvent').value = s.eventName || ''; $('sZoom').value = s.cameraZoom || 1.6; }
+  $('sSave').onclick = async () => { await api('/api/admin/settings', { method: 'POST', json: { model: $('sModel').value, quality: $('sQuality').value, size: $('sSize').value, moderation: $('sMod').value, bots: Math.max(1, Math.min(8, +$('sBots').value || 1)), textModel: $('sTextModel').value, concurrency: +$('sConc').value || 1, eventName: $('sEvent').value, cameraZoom: Math.min(3, Math.max(1, +$('sZoom').value || 1.6)) } }); $('sMsg').textContent = 'Saved ✓'; toast(STATE.readOnly ? 'Saved on this test server only — not the live app' : 'Settings saved', STATE.readOnly ? 'bad' : 'ok'); setTimeout(() => $('sMsg').textContent = '', 4000); };
   if (TOKEN) refresh(); else showLogin();
   setInterval(() => { if (TOKEN && $('tab-queue').classList.contains('on')) refresh(); }, 5000);
 })();
