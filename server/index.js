@@ -40,10 +40,10 @@ async function restoreFromBucket() {
   if (!r.ok) { console.log('storage: bucket unreachable, local disk only:', r.error && r.error.message, BUCKET_ID ? '' : '— set Secret OBJECT_STORAGE_BUCKET to your App Storage bucket name (e.g. repl-default-bucket-...)'); bucket = null; return; }
   // The bucket is the source of truth. The published app's disk starts as a stale snapshot of the workspace (and is wiped on every
   // redeploy anyway), so in deployment we throw the snapshot away and rebuild from the bucket: small files now, photos/art on demand.
-  if (IS_DEPLOYMENT) { for (const d of [THEMES, JOBS]) fs.rmSync(d, { recursive: true, force: true }); fs.rmSync(SETTINGS_FILE, { force: true }); fs.rmSync(path.join(DATA, 'lab-refs.json'), { force: true }); for (const d of [THEMES, JOBS]) fs.mkdirSync(d, { recursive: true }); }
+  if (IS_DEPLOYMENT) { for (const d of [THEMES, JOBS]) fs.rmSync(d, { recursive: true, force: true }); fs.rmSync(SETTINGS_FILE, { force: true }); fs.rmSync(path.join(DATA, 'lab-refs.json'), { force: true }); fs.rmSync(path.join(DATA, 'builder.json'), { force: true }); fs.rmSync(path.join(DATA, 'refs'), { recursive: true, force: true }); for (const d of [THEMES, JOBS]) fs.mkdirSync(d, { recursive: true }); }
   let n = 0;
   for (const o of r.value) {
-    if (!o.name || o.name.endsWith('/') || !/^(themes|jobs)\/|^(settings|lab-refs)\.json$/.test(o.name)) continue; // skip folders and anything that isn't ours
+    if (!o.name || o.name.endsWith('/') || !/^(themes|jobs|refs)\/|^(settings|lab-refs|builder)\.json$/.test(o.name)) continue; // skip folders and anything that isn't ours
     const dest = path.join(DATA, o.name);
     if (IS_DEPLOYMENT && /\/(photo\.jpg|art\.png|art-thumb\.png)$/.test(o.name)) continue; // big files: fetched when first requested
     if (await download(o.name, dest)) n++;
@@ -58,7 +58,7 @@ const OPENAI_BASE = process.env.OPENAI_BASE || 'https://api.openai.com';
 
 // ---------- settings ----------
 const SETTINGS_FILE = path.join(DATA, 'settings.json');
-const DEFAULT_SETTINGS = { model: 'gpt-image-2-2026-04-21', quality: 'medium', size: '1024x1536', moderation: 'low', bots: 1, concurrency: 2, textModel: 'gpt-4.1-mini', foundations: [{ id: 'normal', name: 'Normal', text: '' }, { id: 'bighead', name: 'Big head', text: '' }], autoRun: true, pauseBetween: true, eventName: 'Sketchy Robotics', cameraZoom: 1.6 };
+const DEFAULT_SETTINGS = { model: 'gpt-image-2-2026-04-21', quality: 'medium', size: '1024x1536', moderation: 'low', bots: 1, concurrency: 2, textModel: 'gpt-4.1-mini', foundations: [{ id: 'normal', name: 'Normal', text: '' }, { id: 'bighead', name: 'Big head', text: '' }], safetyFoundation: 'If the person in the photo appears to be under 18, draw them fully clothed in age-appropriate attire with a neutral, friendly pose and expression, regardless of the theme. Never suggestive, never revealing.', eventMode: 'family', testModels: ['gpt-image-2-2026-04-21'], autoRun: true, pauseBetween: true, eventName: 'Sketchy Robotics', cameraZoom: 1.6 };
 function getSettings() { try { return Object.assign({}, DEFAULT_SETTINGS, JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))); } catch (_) { return Object.assign({}, DEFAULT_SETTINGS); } }
 function saveSettings(s) { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2)); persist(SETTINGS_FILE); }
 
@@ -71,14 +71,14 @@ function readTheme(slug) {
   const dir = path.join(THEMES, slug); if (!fs.existsSync(path.join(dir, 'theme.json'))) return null;
   const t = JSON.parse(fs.readFileSync(path.join(dir, 'theme.json'), 'utf8')); t.slug = slug;
   t.prompts = {}; for (const v of VARIANTS) { const f = path.join(dir, 'prompts', v + '.txt'); t.prompts[v] = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : ''; }
-  t.hasThumb = fs.existsSync(path.join(dir, 'thumb.png')); t.variantModels = t.variantModels || {};
+  t.hasThumb = fs.existsSync(path.join(dir, 'thumb.png')); t.variantModels = t.variantModels || {}; t.rating = t.rating === 'adult' ? 'adult' : 'family'; t.proportions = t.proportions === 'bighead' ? 'bighead' : 'normal';
   return t;
 }
-function listThemes() { return fs.readdirSync(THEMES).map(readTheme).filter(Boolean).sort((a, b) => (a.order || 0) - (b.order || 0) || a.name.localeCompare(b.name)); }
+function listThemes() { return fs.readdirSync(THEMES).filter(s => !s.startsWith('_')).map(readTheme).filter(Boolean).sort((a, b) => (a.order || 0) - (b.order || 0) || a.name.localeCompare(b.name)); }
 function writeTheme(slug, t) {
   const dir = path.join(THEMES, slug); fs.mkdirSync(path.join(dir, 'prompts'), { recursive: true });
   const vm = {}; for (const v of VARIANTS) { const x = t.variantModels && t.variantModels[v]; if (x && (x.model || x.quality)) vm[v] = { model: x.model || '', quality: x.quality || '' }; }
-  fs.writeFileSync(path.join(dir, 'theme.json'), JSON.stringify({ name: t.name, enabled: t.enabled !== false, order: t.order || 0, model: t.model || '', quality: t.quality || '', moderation: t.moderation || '', variantModels: vm }, null, 2)); persist(path.join(dir, 'theme.json')); // model/quality: blank = use Settings; variantModels: per-combination overrides
+  fs.writeFileSync(path.join(dir, 'theme.json'), JSON.stringify({ name: t.name, enabled: t.enabled !== false, order: t.order || 0, model: t.model || '', quality: t.quality || '', moderation: t.moderation || '', rating: t.rating === 'adult' ? 'adult' : 'family', proportions: t.proportions === 'bighead' ? 'bighead' : 'normal', variantModels: vm }, null, 2)); persist(path.join(dir, 'theme.json')); // model/quality: blank = use Settings; variantModels: per-combination overrides
   if (t.prompts) for (const v of VARIANTS) if (v in t.prompts) { const f = path.join(dir, 'prompts', v + '.txt'); fs.writeFileSync(f, String(t.prompts[v] || '')); persist(f); }
 }
 
@@ -111,7 +111,8 @@ const botStale = n => { const b = bots.get(n); return !b || Date.now() - b.seen 
 /** Settings ← theme override ← this combination's override ← an explicit pick (Lab) */
 function effectiveSettings(theme, variant, override) {
   const pick = o => { const r = {}; for (const k of ['model', 'quality', 'moderation']) if (o && o[k]) r[k] = o[k]; return r; };
-  return Object.assign(getSettings(), pick(theme), pick(theme.variantModels && theme.variantModels[variant]), override || {});
+  const byRating = theme.moderation ? {} : { moderation: theme.rating === 'adult' ? 'low' : 'auto' }; // family themes get the stricter filter unless the theme says otherwise
+  return Object.assign(getSettings(), byRating, pick(theme), pick(theme.variantModels && theme.variantModels[variant]), override || {});
 }
 async function generateArt(job, override) {
   const theme = readTheme(job.theme); if (!theme) throw new Error('theme missing');
@@ -201,7 +202,7 @@ app.post('/api/phone/:code/photo', upload.single('photo'), async (req, res) => {
 app.get('/api/phone/:code/photo', (req, res) => { const v = phoneCodes.get(req.params.code); if (!v || !v.photo) return res.status(404).end(); res.setHeader('content-type', 'image/jpeg'); res.setHeader('cache-control', 'no-store'); res.send(v.photo); });
 
 // ----- public (guest) -----
-app.get('/api/themes', (req, res) => res.json({ themes: listThemes().filter(t => t.enabled).map(t => ({ slug: t.slug, name: t.name, hasThumb: t.hasThumb, variants: VARIANTS.filter(v => t.prompts[v].trim()) })), variants: VARIANT_LABELS, event: getSettings().eventName, cameraZoom: getSettings().cameraZoom, bots: botCount() }));
+app.get('/api/themes', (req, res) => res.json({ themes: listThemes().filter(t => t.enabled && t.rating === (getSettings().eventMode === 'adult' ? 'adult' : 'family')).map(t => ({ slug: t.slug, name: t.name, hasThumb: t.hasThumb, variants: VARIANTS.filter(v => t.prompts[v].trim()) })), variants: VARIANT_LABELS, event: getSettings().eventName, cameraZoom: getSettings().cameraZoom, bots: botCount() }));
 app.get('/api/themes/:slug/thumb', (req, res) => { const f = path.join(THEMES, slugify(req.params.slug), 'thumb.png'); if (fs.existsSync(f)) res.sendFile(f); else res.status(404).end(); });
 app.post('/api/jobs', upload.single('photo'), async (req, res) => {
   try {
@@ -241,7 +242,7 @@ app.post('/api/jobs/:id/status', (req, res) => { const j = jobs.get(req.params.i
 // ----- admin -----
 app.post('/api/admin/login', (req, res) => { if ((req.body.password || '') === ADMIN_PASSWORD) res.json({ ok: true, token: ADMIN_PASSWORD }); else res.status(401).json({ error: 'wrong password' }); });
 app.get('/api/admin/state', adminAuth, (req, res) => res.json({ settings: getSettings(), themes: listThemes(), variants: VARIANT_LABELS, variantOrder: VARIANTS, jobs: sortedJobs().filter(j => !j.test).slice(-200).map(j => Object.assign(publicJob(j), { guestName: j.guestName, priority: j.priority })), hasKey: !!OPENAI_KEY, durable: !!bucket, readOnly: !!bucket && !IS_DEPLOYMENT }));
-app.post('/api/admin/settings', adminAuth, (req, res) => { const body = req.body || {}; const allowed = ['model', 'quality', 'size', 'moderation', 'concurrency', 'eventName', 'cameraZoom', 'bots', 'textModel', 'foundations']; const s = getSettings(); for (const k of allowed) if (k in body) s[k] = body[k]; saveSettings(s); res.json(Object.assign({ ok: true, durable: !!bucket && IS_DEPLOYMENT }, s)); });
+app.post('/api/admin/settings', adminAuth, (req, res) => { const body = req.body || {}; const allowed = ['model', 'quality', 'size', 'moderation', 'concurrency', 'eventName', 'cameraZoom', 'bots', 'textModel', 'foundations', 'safetyFoundation', 'eventMode', 'testModels']; const s = getSettings(); for (const k of allowed) if (k in body) s[k] = body[k]; saveSettings(s); res.json(Object.assign({ ok: true, durable: !!bucket && IS_DEPLOYMENT }, s)); });
 app.post('/api/admin/themes', adminAuth, (req, res) => { const name = String(req.body.name || '').trim(); if (!name) return res.status(400).json({ error: 'name required' }); let slug = slugify(name); if (readTheme(slug)) slug += '-' + Date.now().toString(36); writeTheme(slug, { name, enabled: true, order: listThemes().length + 1, prompts: {} }); res.json(readTheme(slug)); });
 app.put('/api/admin/themes/:slug', adminAuth, (req, res) => { const t = readTheme(slugify(req.params.slug)); if (!t) return res.status(404).end(); writeTheme(t.slug, Object.assign(t, req.body, { prompts: Object.assign(t.prompts, req.body.prompts || {}), variantModels: Object.assign(t.variantModels, req.body.variantModels || {}) })); res.json(readTheme(t.slug)); });
 app.delete('/api/admin/themes/:slug', adminAuth, (req, res) => { const d = path.join(THEMES, slugify(req.params.slug)); if (fs.existsSync(d)) { fs.rmSync(d, { recursive: true }); unpersist(d); } res.json({ ok: true }); });
@@ -264,17 +265,19 @@ async function chat(model, system, user, maxTokens) {
 const WRITER_SYSTEM = `You write prompts for an AI image-editing model that turns a guest's selfie into black-and-white line art which a pen plotter then draws on paper at an event.
 You are given a FOUNDATION: fixed, non-negotiable instructions that will be placed verbatim at the top of the final prompt. Do NOT repeat, paraphrase, weaken or contradict anything in it.
 Your job is to write only the THEME SECTION that follows it: the costume/outfit, props, hair/accessory treatment, pose and positioning, expression, body details and setting for the requested combination of people, based on the operator's description. Match the foundation's tone and level of detail. Be concrete and visual (what is worn, held, where things are), avoid vague adjectives, keep it to one tightly written paragraph or a short list of sentences, and never mention text, logos, watermarks, colours or shading (the output must stay clean line art). Respect the combination exactly: for two people say who is on the LEFT and who is on the RIGHT; for person + pet describe the pet's treatment too.
-Output ONLY the theme section text, no heading, no preamble, no quotes.`;
+Output ONLY the theme section text, no heading, no preamble, no quotes.
+AUDIENCE RULES: when the audience is FAMILY, everything must be wholesome and suitable for children: fully clothed, no innuendo, no weapons pointed at people, no gore, no alcohol or drugs. When the audience is ADULT, the theme may be edgy, flirtatious, risqué or exotic in costume and attitude (within what a general-audience image service will render: no nudity, no explicit content).`;
 app.post('/api/admin/writer', adminAuth, async (req, res) => {
   try {
     if (!OPENAI_KEY) throw new Error('OPENAI_API_KEY is not set'); const st = getSettings(); const model = String(req.body.model || st.textModel || 'gpt-4.1-mini');
     const fid = String(req.body.foundation || ''); const f = (st.foundations || []).find(x => x.id === fid) || { name: 'none', text: '' };
     const desc = String(req.body.description || '').trim(); if (!desc) return res.status(400).json({ error: 'describe the theme first' });
     const variants = (Array.isArray(req.body.variants) ? req.body.variants : [req.body.variant]).filter(v => VARIANTS.includes(v)); if (!variants.length) return res.status(400).json({ error: 'pick a combination' });
-    const themeName = String(req.body.themeName || '').trim(); const extra = String(req.body.extra || '').trim();
+    const themeName = String(req.body.themeName || '').trim(); const extra = String(req.body.extra || '').trim(); const rating = req.body.rating === 'adult' ? 'adult' : 'family';
+    const head = [st.safetyFoundation, f.text].map(x => (x || '').trim()).filter(Boolean).join('\n\n'); // safety rules first, then the foundation — both verbatim
     const results = await Promise.all(variants.map(async v => {
-      const user = `FOUNDATION (already in the prompt, do not repeat):\n${f.text || '(none)'}\n\nTHEME NAME: ${themeName || '(untitled)'}\nCOMBINATION: ${VARIANT_LABELS[v]}\nOPERATOR'S DESCRIPTION OF THE THEME: ${desc}${extra ? '\nEXTRA RULES FOR THIS THEME: ' + extra : ''}\n\nWrite the theme section now.`;
-      try { const part = await chat(model, WRITER_SYSTEM, user, 900); return { variant: v, label: VARIANT_LABELS[v], part, prompt: (f.text ? f.text.trim() + '\n\n' : '') + part }; } catch (e) { return { variant: v, label: VARIANT_LABELS[v], error: e.message }; } }));
+      const user = `FOUNDATION (already in the prompt, do not repeat):\n${head || '(none)'}\n\nAUDIENCE: ${rating.toUpperCase()}\nTHEME NAME: ${themeName || '(untitled)'}\nCOMBINATION: ${VARIANT_LABELS[v]}\nOPERATOR'S DESCRIPTION OF THE THEME: ${desc}${extra ? '\nEXTRA RULES FOR THIS THEME: ' + extra : ''}\n\nWrite the theme section now.`;
+      try { const part = await chat(model, WRITER_SYSTEM, user, 900); return { variant: v, label: VARIANT_LABELS[v], part, prompt: (head ? head + '\n\n' : '') + part }; } catch (e) { return { variant: v, label: VARIANT_LABELS[v], error: e.message }; } }));
     res.json({ ok: true, model, foundation: f.name, results });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -320,6 +323,65 @@ app.post('/api/admin/lab/:id/thumb', adminAuth, async (req, res) => { // use thi
   const art = path.join(JOBS, j.id, 'art.png'); if (!(await ensureLocal(art))) return res.status(404).json({ error: 'no image for this result' });
   await sharp(art).resize(700, 700, { fit: 'inside', withoutEnlargement: true }).png().toFile(path.join(THEMES, theme.slug, 'thumb.png')); persist(path.join(THEMES, theme.slug, 'thumb.png'));
   res.json({ ok: true, theme: theme.slug });
+});
+// ----- reference-face library (shared by the Lab and the Theme Builder) -----
+const REFS = path.join(DATA, 'refs'); fs.mkdirSync(REFS, { recursive: true });
+const listRefs = () => { try { return fs.readdirSync(REFS).filter(f => f.endsWith('.jpg')).map(f => { const st = fs.statSync(path.join(REFS, f)); return { id: f.slice(0, -4), at: st.mtimeMs }; }).sort((a, b) => b.at - a.at); } catch (_) { return []; } };
+async function refBuffer(id) { if (!/^[a-f0-9]{16}$/.test(id)) return null; const f = path.join(REFS, id + '.jpg'); return (await ensureLocal(f)) ? fs.readFileSync(f) : null; }
+app.get('/api/admin/refs', adminAuth, (req, res) => res.json({ refs: listRefs() }));
+app.post('/api/admin/refs', adminAuth, upload.single('photo'), async (req, res) => { try { const buf = await sharp(req.file.buffer).rotate().resize(1536, 1536, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 92 }).toBuffer(); const id = crypto.createHash('sha1').update(buf).digest('hex').slice(0, 16); const f = path.join(REFS, id + '.jpg'); if (!fs.existsSync(f)) { fs.writeFileSync(f, buf); persist(f); } res.json({ id }); } catch (e) { res.status(400).json({ error: 'not a photo we can read' }); } });
+app.get('/api/admin/refs/:id', adminAuth, async (req, res) => { const b = await refBuffer(req.params.id); if (!b) return res.status(404).end(); res.setHeader('content-type', 'image/jpeg'); res.send(b); });
+app.delete('/api/admin/refs/:id', adminAuth, (req, res) => { const f = path.join(REFS, req.params.id + '.jpg'); if (/^[a-f0-9]{16}$/.test(req.params.id)) { fs.rmSync(f, { force: true }); if (bucket && IS_DEPLOYMENT) bucket.delete(rel(f)).catch(() => {}); } res.json({ ok: true }); });
+
+// ----- Theme Builder: one draft at a time, saved as it goes -----
+const BUILDER = path.join(DATA, 'builder.json');
+const getDraft = () => { try { return JSON.parse(fs.readFileSync(BUILDER, 'utf8')); } catch (_) { return { name: '', desc: '', extra: '', audience: 'family', proportions: 'normal', refs: {}, prompts: {}, picks: {}, thumb: null }; } };
+const saveDraft = d => { fs.writeFileSync(BUILDER, JSON.stringify(d)); persist(BUILDER); };
+const flavorsOf = d => { const out = []; for (const a of (d.audience === 'both' ? ['family', 'adult'] : [d.audience === 'adult' ? 'adult' : 'family'])) for (const p of (d.proportions === 'both' ? ['normal', 'bighead'] : [d.proportions === 'bighead' ? 'bighead' : 'normal'])) out.push(a + '-' + p); return out; };
+const flavorName = (base, fl) => base + (fl.endsWith('bighead') ? ' (Big head)' : '') + (fl.startsWith('adult') ? ' 18+' : '');
+app.get('/api/admin/builder', adminAuth, (req, res) => { const d = getDraft(); res.json(Object.assign({ flavors: flavorsOf(d), tests: [...jobs.values()].filter(j => j.lab && j.builder).sort((a, b) => b.createdAt - a.createdAt).map(labJob) }, d)); });
+app.put('/api/admin/builder', adminAuth, (req, res) => { const d = Object.assign(getDraft(), req.body || {}); saveDraft(d); res.json({ ok: true, flavors: flavorsOf(d) }); });
+app.delete('/api/admin/builder', adminAuth, (req, res) => { fs.rmSync(BUILDER, { force: true }); if (bucket && IS_DEPLOYMENT) bucket.delete(rel(BUILDER)).catch(() => {}); for (const j of [...jobs.values()]) if (j.lab && j.builder) { jobs.delete(j.id); fs.rmSync(path.join(JOBS, j.id), { recursive: true, force: true }); unpersist(path.join(JOBS, j.id)); } res.json({ ok: true }); });
+app.post('/api/admin/builder/write', adminAuth, async (req, res) => { // prompts for every flavour × combination (or just the ones asked for)
+  try { const d = getDraft(); const st = getSettings(); const model = String(req.body.model || st.textModel || 'gpt-4.1-mini'); const flavors = (req.body.flavors && req.body.flavors.length ? req.body.flavors : flavorsOf(d)).filter(f => flavorsOf(d).includes(f)); const variants = (req.body.variants && req.body.variants.length ? req.body.variants : VARIANTS).filter(v => VARIANTS.includes(v));
+    if (!d.desc || !d.desc.trim()) return res.status(400).json({ error: 'describe the theme first' });
+    const jobsList = []; for (const fl of flavors) for (const v of variants) jobsList.push({ fl, v });
+    const results = await Promise.all(jobsList.map(async ({ fl, v }) => { const [rating, prop] = fl.split('-'); const f = (st.foundations || []).find(x => x.id === prop) || { text: '' }; const head = [st.safetyFoundation, f.text].map(x => (x || '').trim()).filter(Boolean).join('\n\n');
+      const user = `FOUNDATION (already in the prompt, do not repeat):\n${head || '(none)'}\n\nAUDIENCE: ${rating.toUpperCase()}\nPROPORTIONS: ${prop === 'bighead' ? 'big-head caricature' : 'normal'}\nTHEME NAME: ${d.name || '(untitled)'}\nCOMBINATION: ${VARIANT_LABELS[v]}\nOPERATOR'S DESCRIPTION OF THE THEME: ${d.desc}${d.extra ? '\nEXTRA RULES FOR THIS THEME: ' + d.extra : ''}\n\nWrite the theme section now.`;
+      try { const part = await chat(model, WRITER_SYSTEM, user, 900); return { fl, v, prompt: (head ? head + '\n\n' : '') + part }; } catch (e) { return { fl, v, error: e.message }; } }));
+    const d2 = getDraft(); d2.prompts = d2.prompts || {}; for (const r of results) if (!r.error) { d2.prompts[r.fl] = d2.prompts[r.fl] || {}; d2.prompts[r.fl][r.v] = r.prompt; } saveDraft(d2);
+    res.json({ ok: true, model, results, prompts: d2.prompts });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/admin/builder/test', adminAuth, async (req, res) => { // generate test images for one flavour: every combination that has a reference × the test models
+  try { const d = getDraft(); const st = getSettings(); const fl = String(req.body.flavor || flavorsOf(d)[0]); const models = (Array.isArray(req.body.models) && req.body.models.length ? req.body.models : (st.testModels || [st.model])).filter(Boolean).slice(0, 6);
+    const variants = (req.body.variants && req.body.variants.length ? req.body.variants : VARIANTS).filter(v => VARIANTS.includes(v) && d.refs && d.refs[v] && d.prompts && d.prompts[fl] && d.prompts[fl][v]);
+    if (!variants.length) return res.status(400).json({ error: 'no combination has both a reference photo and a prompt yet' });
+    // the test rides on the Lab machinery; we need a theme context for generateArt → a hidden scratch theme named after the draft
+    const scratchSlug = '_builder'; if (!readTheme(scratchSlug)) writeTheme(scratchSlug, { name: 'Theme Builder (scratch)', enabled: false, order: 999, prompts: {} });
+    const batch = 'lab-' + Date.now().toString(36); const [rating] = fl.split('-');
+    const runs = []; for (const v of variants) { const photo = await refBuffer(d.refs[v]); if (!photo) continue; for (const model of models) runs.push({ v, model, photo }); }
+    const results = await Promise.all(runs.map(async ({ v, model, photo }) => { const id = 'lab-' + crypto.randomBytes(4).toString('hex'); const prompt = d.prompts[fl][v];
+      const job = { id, number: 0, status: 'processing', theme: scratchSlug, themeName: d.name || 'draft', variant: v, createdAt: Date.now(), attempts: 1, test: true, lab: true, builder: true, flavor: fl, batch, photoHash: d.refs[v], labPrompt: prompt, labModel: model };
+      fs.mkdirSync(path.join(JOBS, id), { recursive: true }); fs.writeFileSync(path.join(JOBS, id, 'photo.jpg'), photo); persist(path.join(JOBS, id, 'photo.jpg')); jobs.set(id, job); const t0 = Date.now();
+      const override = { model, prompt, moderation: rating === 'adult' ? 'low' : 'auto' }; if (req.body.quality) override.quality = String(req.body.quality);
+      try { await generateArt(job, override); job.status = 'test'; job.readyAt = Date.now(); } catch (e) { job.status = 'failed'; job.error = String(e.message || e); }
+      job.seconds = Math.round((Date.now() - t0) / 1000); saveJob(job); return Object.assign(labJob(job), { flavor: fl }); }));
+    res.json({ ok: true, results });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/admin/builder/publish', adminAuth, async (req, res) => { // one flavour → a new theme or an existing one
+  try { const d = getDraft(); const fl = String(req.body.flavor || flavorsOf(d)[0]); const [rating, prop] = fl.split('-'); const prompts = (d.prompts && d.prompts[fl]) || {}; if (!Object.keys(prompts).length) return res.status(400).json({ error: 'no prompts written for this variant yet' });
+    const picks = (d.picks && d.picks[fl]) || {}; let slug = req.body.target && req.body.target !== 'new' ? slugify(req.body.target) : null; let existing = slug ? readTheme(slug) : null; if (slug && !existing) return res.status(400).json({ error: 'target theme not found' });
+    const name = String(req.body.name || flavorName(d.name || 'Theme', fl)).trim();
+    if (!existing) { slug = slugify(name); if (readTheme(slug)) slug += '-' + Date.now().toString(36); }
+    const base = existing || { name, enabled: false, order: listThemes().length + 1, prompts: {}, variantModels: {} };
+    const th = Object.assign({}, base, { name: existing ? existing.name : name, rating: rating === 'adult' ? 'adult' : 'family', proportions: prop, prompts: Object.assign({}, base.prompts, prompts), variantModels: Object.assign({}, base.variantModels || {}) });
+    for (const v of VARIANTS) if (picks[v] && picks[v].model) th.variantModels[v] = { model: picks[v].model, quality: picks[v].quality || '' };
+    writeTheme(slug, th);
+    const thumbJob = d.thumb && d.thumb[fl] ? jobs.get(d.thumb[fl]) : null; if (thumbJob) { const art = path.join(JOBS, thumbJob.id, 'art.png'); if (await ensureLocal(art)) { await sharp(art).resize(700, 700, { fit: 'inside', withoutEnlargement: true }).png().toFile(path.join(THEMES, slug, 'thumb.png')); persist(path.join(THEMES, slug, 'thumb.png')); } }
+    res.json({ ok: true, slug, name: readTheme(slug).name, isNew: !existing });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/admin/lab-clear', adminAuth, (req, res) => { // wipe lab results: all, one theme, or everything except results in use
   const scope = String(req.body.scope || 'all'); const theme = req.body.theme ? slugify(req.body.theme) : null; let n = 0;
@@ -399,6 +461,7 @@ app.post('/api/admin/themes/import', adminAuth, upload.single('zip'), async (req
       const st = t.settings; const yes = v => /^(yes|true|on|1)$/i.test(v); 
       const startPrompts = replaceAll ? {} : base.prompts; const th = Object.assign({}, base, { name: existing ? existing.name : t.name, prompts: Object.assign({}, startPrompts, t.prompts), variantModels: Object.assign({}, base.variantModels || {}) });
       if (replaceAll) for (const v of VARIANTS) if (!(v in th.prompts)) th.prompts[v] = '';
+      if (st.rating != null) th.rating = /adult|18/.test(st.rating) ? 'adult' : 'family'; if (st.proportions != null) th.proportions = /big/.test(st.proportions) ? 'bighead' : 'normal';
       if (st.model != null) th.model = st.model; if (st.quality != null) th.quality = st.quality; if (st.moderation != null) th.moderation = st.moderation; if (st.order != null && isFinite(+st.order)) th.order = +st.order; if (st.enabled != null) th.enabled = yes(st.enabled);
       for (const k of Object.keys(st)) { const m = k.match(/^(.+)\.(model|quality)$/); if (!m) continue; const v = variantFor(m[1]); if (!v) continue; th.variantModels[v] = Object.assign({}, th.variantModels[v] || {}, { [m[2]]: st[k] }); }
       writeTheme(slug, th);
@@ -411,7 +474,7 @@ app.get('/api/admin/themes/export', adminAuth, async (req, res) => { // ?slug=ro
   const AdmZip = require('adm-zip'); const zip = new AdmZip(); const which = req.query.slug ? listThemes().filter(t => t.slug === req.query.slug) : listThemes();
   for (const t of which) { const dir = t.name.replace(/[\\/:*?"<>|]/g, '-');
     for (const v of VARIANTS) if (t.prompts[v] && t.prompts[v].trim()) zip.addFile(`${dir}/${VARIANT_FILES[v][0]}.md`, Buffer.from(t.prompts[v], 'utf8'));
-    const lines = [`enabled: ${t.enabled ? 'yes' : 'no'}`, `order: ${t.order || 0}`]; if (t.model) lines.push('model: ' + t.model); if (t.quality) lines.push('quality: ' + t.quality); if (t.moderation) lines.push('moderation: ' + t.moderation);
+    const lines = [`enabled: ${t.enabled ? 'yes' : 'no'}`, `order: ${t.order || 0}`, `rating: ${t.rating === 'adult' ? 'adult' : 'family'}`, `proportions: ${t.proportions === 'bighead' ? 'bighead' : 'normal'}`]; if (t.model) lines.push('model: ' + t.model); if (t.quality) lines.push('quality: ' + t.quality); if (t.moderation) lines.push('moderation: ' + t.moderation);
     for (const v of VARIANTS) { const vm = t.variantModels[v] || {}; if (vm.model) lines.push(`${VARIANT_FILES[v][0]}.model: ${vm.model}`); if (vm.quality) lines.push(`${VARIANT_FILES[v][0]}.quality: ${vm.quality}`); }
     zip.addFile(`${dir}/theme.txt`, Buffer.from(lines.join('\n') + '\n', 'utf8'));
     const th = path.join(THEMES, t.slug, 'thumb.png'); if (await ensureLocal(th)) zip.addFile(`${dir}/thumbnail.png`, fs.readFileSync(th)); }
