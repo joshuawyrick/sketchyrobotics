@@ -395,6 +395,7 @@ app.post('/api/admin/lab', adminAuth, upload.single('photo'), async (req, res) =
     // reference photo: a fresh upload, or reuse the photo of an earlier lab job
     let photo; if (req.file) photo = await sharp(req.file.buffer).rotate().resize(1536, 1536, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 92 }).toBuffer();
     else if (req.body.refJob && jobs.has(req.body.refJob)) { const f = path.join(JOBS, req.body.refJob, 'photo.jpg'); if (await ensureLocal(f)) photo = fs.readFileSync(f); }
+    else if (req.body.refId) photo = await refBuffer(String(req.body.refId)); // a face from the Lab's library
     if (!photo) return res.status(400).json({ error: 'add a reference photo' });
     const batch = 'lab-' + Date.now().toString(36); const photoHash = crypto.createHash('sha1').update(photo).digest('hex').slice(0, 16);
     const results = models.map(model => {
