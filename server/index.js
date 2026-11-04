@@ -218,6 +218,7 @@ function newSession(se) { const t = crypto.randomBytes(24).toString('hex'); sess
 // static pages
 app.use('/studio', express.static(path.join(ROOT, 'public', 'studio')));
 app.use('/admin', express.static(path.join(ROOT, 'public', 'admin')));
+app.use('/start', express.static(path.join(ROOT, 'public', 'start'))); // operator start page: sign in once, open everything
 app.use('/', express.static(path.join(ROOT, 'public', 'guest')));
 app.get('/p/:code', (req, res) => res.sendFile(path.join(ROOT, 'public', 'phone', 'index.html'))); // guest's own phone: scanned from the iPad's QR
 
@@ -232,6 +233,11 @@ app.post('/api/phone/code', (req, res) => {
   phoneCodes.set(code, { theme: theme.slug, themeName: theme.name, variant, createdAt: Date.now(), photo: null });
   const base = (req.get('x-forwarded-proto') || req.protocol) + '://' + req.get('host');
   res.json({ code, url: `${base}/p/${code}`, expiresInSec: PHONE_TTL / 1000 });
+});
+// operator start page: a QR for the guest page itself, so an operator can point an iPad's camera at the laptop screen
+app.get('/api/start/guest-qr.svg', async (req, res) => {
+  const base = (req.get('x-forwarded-proto') || req.protocol) + '://' + req.get('host');
+  try { const svg = await require('qrcode').toString(`${base}/`, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }); res.setHeader('content-type', 'image/svg+xml'); res.send(svg); } catch (e) { res.status(500).end(); }
 });
 app.get('/api/phone/:code/qr.svg', async (req, res) => {
   const v = phoneCodes.get(req.params.code); if (!v) return res.status(404).end();

@@ -51,7 +51,7 @@
 </head>
 <body>
 <header><svg class="logo" viewBox="60 150 1870 400"></svg><span class="t">Admin</span>
-  <nav id="nav"><button data-t="queue" class="on">Queue</button><button data-t="themes">Themes</button><button data-t="test">Prompt Lab</button><button data-t="foundations">Foundations</button><button data-t="settings">Settings</button><a href="/studio" target="_blank"><button>Open Plotter Studio ↗</button></a><span class="note" id="whoBar" style="margin-left:auto;align-self:center"></span></nav></header>
+  <nav id="nav"><button data-t="queue" class="on">Queue</button><button data-t="themes">Themes</button><button data-t="settings">Settings</button><a href="/studio" target="_blank"><button>Open Plotter Studio ↗</button></a><span class="note" id="whoBar" style="margin-left:auto;align-self:center"></span></nav></header>
 <main>
   <div class="login card" id="login"><h2>Sign in</h2><input type="text" id="loginName" placeholder="name (leave blank for admin)" style="margin-bottom:8px"><input type="password" id="pw" placeholder="password"><div class="row" style="margin-top:10px"><button class="primary" id="loginBtn">Sign in</button><span id="loginErr" class="bad"></span></div></div>
 
@@ -121,7 +121,7 @@
     </div>
   </section>
 
-  <section class="tab" id="tab-test">
+  <section class="tab" id="tab-test" style="display:none!important">
     <div class="card"><h2>Prompt Lab <span class="note">test a theme's saved prompts on your reference faces across the models you tick; keep the winners</span></h2>
       <div class="row"><label>Theme</label><select id="ltTheme" style="max-width:300px"></select><span class="note" id="ltInfo"></span></div>
       <div class="refLib"><span class="note">Faces:</span><div id="ltLib" class="refStrip"></div><button id="ltLibAdd">+ Add a face</button><input type="file" id="ltLibIn" accept="image/*" style="display:none"><span class="note">click a face, then the combinations it should test (or drop a photo on a slot). Leave a slot empty to skip it.</span></div>
@@ -157,7 +157,7 @@
     </div>
   </section>
 
-  <section class="tab" id="tab-foundations">
+  <section class="tab" id="tab-foundations" style="display:none!important">
     <div class="card"><h2>Master foundations <span class="note">no-compromise instructions placed verbatim at the top of every prompt the AI writer produces</span></h2>
       <p class="note">Keep these to the rules that must never bend: line-art style, likeness, paper/pen constraints, what to never draw. Theme-specific styling (outfits, props, pose) is what the writer adds per theme. "Normal" is for standard proportions; "Big head" for caricature themes. You can add more.</p>
       <div class="wItem"><div class="row"><label>Safety rules (always on)</label><span class="note">placed before every foundation, in every prompt the writer or builder produces; not selectable per theme</span></div><textarea id="safetyText" placeholder="If the person appears to be under 18…"></textarea></div>
@@ -210,15 +210,15 @@
 (() => {
   const $ = id => document.getElementById(id);
   let toastT = null; function toast(msg, kind) { const t = $('toast'); t.textContent = msg; t.className = 'on ' + (kind || 'ok'); clearTimeout(toastT); toastT = setTimeout(() => t.className = '', kind === 'bad' ? 6000 : 3500); }
-  let TOKEN = sessionStorage.getItem('sr.token') || ''; let STATE = null; let editing = null;
+  let TOKEN = sessionStorage.getItem('sr.token') || localStorage.getItem('sr.op') || ''; /* sr.op: shared operator sign-in from /start and Studio */ let STATE = null; let editing = null;
   fetch('/logo.svg').then(r => r.text()).then(t => { const m = t.match(/<svg[^>]*>([\s\S]*)<\/svg>/); if (m) document.querySelector('header .logo').innerHTML = m[1]; }).catch(() => {});
   const api = async (url, opts = {}) => { opts.headers = Object.assign({ 'x-admin-token': TOKEN }, opts.headers || {}); if (opts.json) { opts.body = JSON.stringify(opts.json); opts.headers['Content-Type'] = 'application/json'; } const r = await fetch(url, opts); const j = await r.json().catch(() => ({})); if (r.status === 401) { showLogin(); throw new Error('login'); } if (!r.ok) throw new Error(j.error || r.status); return j; };
   function showLogin() { $('login').style.display = ''; document.querySelectorAll('.tab').forEach(t => t.classList.remove('on')); }
-  $('loginBtn').onclick = async () => { try { const r = await api('/api/admin/login', { method: 'POST', json: { name: $('loginName').value, password: $('pw').value } }); TOKEN = r.token; sessionStorage.setItem('sr.token', TOKEN); $('login').style.display = 'none'; $('pw').value = ''; tab('queue'); refresh(); } catch (e) { $('loginErr').textContent = 'Wrong name or password'; } };
+  $('loginBtn').onclick = async () => { try { const r = await api('/api/admin/login', { method: 'POST', json: { name: $('loginName').value, password: $('pw').value } }); TOKEN = r.token; sessionStorage.setItem('sr.token', TOKEN); localStorage.setItem('sr.op', TOKEN); $('login').style.display = 'none'; $('pw').value = ''; tab('queue'); refresh(); } catch (e) { $('loginErr').textContent = 'Wrong name or password'; } };
   $('pw').addEventListener('keydown', e => { if (e.key === 'Enter') $('loginBtn').click(); });
   document.querySelectorAll('#nav button[data-t]').forEach(b => b.onclick = () => tab(b.dataset.t));
   function applyRole() { const admin = STATE.me && STATE.me.role === 'admin'; document.querySelectorAll('#nav button[data-t]').forEach(b => { if (b.dataset.t !== 'queue') b.style.display = admin ? '' : 'none'; }); if (!admin && !$('tab-queue').classList.contains('on')) tab('queue');
-    $('whoBar').innerHTML = STATE.me ? `${STATE.me.name} (${STATE.me.role}) · <a href="#" id="signOut">sign out</a>` : ''; const so = $('signOut'); if (so) so.onclick = async e => { e.preventDefault(); await api('/api/logout', { method: 'POST', json: {} }).catch(() => {}); TOKEN = ''; sessionStorage.removeItem('sr.token'); STATE = null; location.reload(); }; }
+    $('whoBar').innerHTML = STATE.me ? `${STATE.me.name} (${STATE.me.role}) · <a href="#" id="signOut">sign out</a>` : ''; const so = $('signOut'); if (so) so.onclick = async e => { e.preventDefault(); await api('/api/logout', { method: 'POST', json: {} }).catch(() => {}); TOKEN = ''; sessionStorage.removeItem('sr.token'); localStorage.removeItem('sr.op'); STATE = null; location.reload(); }; }
   function tab(t) { document.querySelectorAll('#nav button[data-t]').forEach(b => b.classList.toggle('on', b.dataset.t === t)); document.querySelectorAll('.tab').forEach(s => s.classList.toggle('on', s.id === 'tab-' + t)); refresh(); }
   async function refresh() {
     try { STATE = await api('/api/admin/state'); } catch (e) { return; }

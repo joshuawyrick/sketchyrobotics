@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sketchy Robotics — Operator start</title>
+<link rel="icon" href="/logo.svg">
+<style>
+  :root { --blue: #006df6; --ink: #0b1020; --mute: #5b6478; --line: #e3e7ef; --bg: #f5f7fb; --card: #fff; --ok: #137a3a; --bad: #b4232c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--ink); background: var(--bg); }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 28px 16px 60px; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+  header img { height: 44px; }
+  header h1 { font-size: 22px; margin: 0; }
+  header small { display: block; color: var(--mute); font-weight: normal; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; margin-bottom: 16px; }
+  label { display: block; font-size: 13px; color: var(--mute); margin: 10px 0 4px; }
+  input { width: 100%; font: inherit; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; }
+  input:focus { outline: 2px solid var(--blue); border-color: var(--blue); }
+  button, .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; font: inherit; font-weight: 600; padding: 12px 18px; border-radius: 10px; border: 1px solid var(--blue); background: var(--blue); color: #fff; cursor: pointer; text-decoration: none; }
+  button:hover, .btn:hover { filter: brightness(1.07); }
+  .btn.ghost { background: #fff; color: var(--blue); }
+  .btn.big { width: 100%; padding: 18px; font-size: 18px; border-radius: 12px; }
+  .err { color: var(--bad); min-height: 1.3em; margin-top: 8px; font-size: 14px; }
+  .who { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--mute); font-size: 14px; }
+  .who b { color: var(--ink); }
+  .who a { color: var(--blue); }
+  .grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+  @media (min-width: 640px) { .grid { grid-template-columns: 1fr 1fr; } }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 10px; }
+  .tile h2 { margin: 0; font-size: 18px; }
+  .tile p { margin: 0; color: var(--mute); font-size: 14px; flex: 1; }
+  .step { display: inline-block; width: 26px; height: 26px; border-radius: 50%; background: var(--blue); color: #fff; font-weight: 700; text-align: center; line-height: 26px; font-size: 14px; margin-right: 6px; }
+  .note { font-size: 13px; color: var(--mute); background: #f0f4ff; border-radius: 8px; padding: 8px 10px; }
+  .qr { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .qr img { width: 150px; height: 150px; border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 6px; }
+  .qr code { font-size: 13px; background: #f0f4ff; padding: 4px 8px; border-radius: 6px; word-break: break-all; }
+  .hidden { display: none !important; }
+  ul.check { margin: 6px 0 0; padding-left: 20px; color: var(--mute); font-size: 14px; }
+  ul.check li { margin: 3px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="/logo.svg" alt="" onerror="this.style.display='none'">
+    <h1>Operator start<small>Sign in once, then open everything you need to run the event.</small></h1>
+  </header>
+
+  <!-- ===== signed out ===== -->
+  <section id="login" class="card hidden">
+    <form id="form">
+      <label for="name">Operator name</label>
+      <input id="name" autocomplete="username" autocapitalize="off" required>
+      <label for="pw">Password</label>
+      <input id="pw" type="password" autocomplete="current-password" required>
+      <div class="err" id="err"></div>
+      <button type="submit" id="go" class="btn big">Sign in</button>
+    </form>
+  </section>
+
+  <!-- ===== signed in ===== -->
+  <section id="home" class="hidden">
+    <div class="card who">
+      <span>Signed in as <b id="who"></b> — this sign-in is shared by Admin and Plotter Studio on this computer.</span>
+      <a href="#" id="out">Sign out</a>
+    </div>
+
+    <div class="grid">
+      <div class="tile">
+        <h2><span class="step">1</span>Plotter Studio</h2>
+        <p>Runs the DexArms. Open it on the <b>laptop plugged into the arms</b>. Connect each arm with the USB button inside Studio, then leave the tab open all event.</p>
+        <div class="note">Use <b>Chrome or Edge</b> for Studio — Safari and Firefox can't talk to the arms over USB.</div>
+        <a class="btn" href="/studio" target="_blank" rel="opener">Open Plotter Studio</a>
+      </div>
+
+      <div class="tile">
+        <h2><span class="step">2</span>Admin</h2>
+        <p>The queue: see photos as guests submit them, approve or redo drawings, and watch what each arm is working on. Also themes and settings.</p>
+        <a class="btn" href="/admin" target="_blank" rel="opener">Open Admin</a>
+      </div>
+
+      <div class="tile" style="grid-column: 1 / -1">
+        <h2><span class="step">3</span>Guest iPads</h2>
+        <p>On each iPad, open the guest page in Safari and tap <i>Share → Add to Home Screen</i> so it runs full-screen. Point the iPad's camera at this code to jump straight there, or type the address.</p>
+        <div class="qr">
+          <img id="qr" alt="QR code for the guest page">
+          <div>
+            <div>Guest page address:</div>
+            <code id="guestUrl"></code>
+            <div style="margin-top:10px"><a class="btn ghost" href="/" target="_blank">Open guest page here</a></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <b>Before the first guest</b>
+      <ul class="check">
+        <li>Studio shows every arm as <b>connected</b> and homed, pens loaded, paper clipped.</li>
+        <li>Admin queue is empty (or old test jobs cleared) and the right themes are turned on.</li>
+        <li>Every iPad is on the venue Wi-Fi and showing the guest page.</li>
+        <li>Do a test drawing of yourself end to end before opening the line.</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const KEY = 'sr.op'; // the same key Plotter Studio uses; Admin now reads it too
+  const token = () => { try { return localStorage.getItem(KEY) || ''; } catch (_) { return ''; } };
+  const setToken = t => { try { if (t) { localStorage.setItem(KEY, t); sessionStorage.setItem('sr.token', t); } else { localStorage.removeItem(KEY); sessionStorage.removeItem('sr.token'); } } catch (_) {} };
+  const show = signedIn => { $('login').classList.toggle('hidden', signedIn); $('home').classList.toggle('hidden', !signedIn); };
+
+  async function me() {
+    const t = token(); if (!t) return null;
+    try { const r = await fetch('/api/me', { headers: { 'x-admin-token': t } }); if (!r.ok) return null; return await r.json(); } catch (_) { return null; }
+  }
+
+  async function boot() {
+    const u = await me();
+    if (!u) { setToken(''); show(false); $('name').focus(); return; }
+    $('who').textContent = `${u.name} (${u.role})`;
+    $('guestUrl').textContent = location.origin + '/';
+    $('qr').src = '/api/start/guest-qr.svg';
+    show(true);
+  }
+
+  $('form').addEventListener('submit', async e => {
+    e.preventDefault(); $('err').textContent = ''; $('go').disabled = true;
+    try {
+      const r = await fetch('/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: $('name').value.trim(), password: $('pw').value }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.token) throw new Error(d.error || 'Wrong name or password');
+      setToken(d.token); $('pw').value = ''; await boot();
+    } catch (err) { $('err').textContent = err.message; }
+    $('go').disabled = false;
+  });
+
+  $('out').addEventListener('click', async e => {
+    e.preventDefault();
+    try { await fetch('/api/logout', { method: 'POST', headers: { 'x-admin-token': token() } }); } catch (_) {}
+    setToken(''); show(false);
+  });
+
+  boot();
+</script>
+</body>
+</html>
