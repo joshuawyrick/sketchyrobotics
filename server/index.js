@@ -97,7 +97,7 @@ function loadState() {
   seq = Math.max(0, ...[...jobs.values()].map(j => j.number || 0));
 }
 function saveJob(j) { fs.mkdirSync(path.join(JOBS, j.id), { recursive: true }); const f = path.join(JOBS, j.id, 'job.json'); fs.writeFileSync(f, JSON.stringify(j, null, 2)); jobs.set(j.id, j); if (!j.test || j.lab) persist(f); }
-function publicJob(j) { const { id, number, status, theme, themeName, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset, names, bot, pay, pad } = j; return { id, number, status, theme, themeName, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset, names, bot, pad, pay: pay ? { size: pay.size, label: pay.label, amount: pay.amount, paidAt: pay.paidAt, method: pay.method } : null }; }
+function publicJob(j) { const { id, number, status, theme, themeName, proportions, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset, names, bot, pay, pad } = j; return { id, number, status, theme, themeName, proportions, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset, names, bot, pad, pay: pay ? { size: pay.size, label: pay.label, amount: pay.amount, paidAt: pay.paidAt, method: pay.method } : null }; }
 // ---------- payments (Stripe Checkout: the iPad shows a QR, the guest pays on their own phone) ----------
 function cleanPay(p) { const sizes = Array.isArray(p.sizes) ? p.sizes : []; return { enabled: !!p.enabled, sizes: sizes.map(z => ({ id: String(z.id || '').replace(/[^0-9a-z.x]/gi, '').slice(0, 12), label: String(z.label || z.id || '').slice(0, 30), price: Math.max(0, Math.round(+z.price || 0)), enabled: z.enabled !== false })).filter(z => z.id) }; }
 const paySizes = () => ((getSettings().pay || {}).sizes || []).filter(z => z.enabled && z.price > 0);
@@ -267,7 +267,7 @@ app.post('/api/jobs', upload.single('photo'), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'no photo' });
     const id = crypto.randomBytes(6).toString('hex');
     const names = { a: cleanName(req.body.name1), b: cleanName(req.body.name2), pet: cleanName(req.body.petName) }; if (!names.a && !names.b && !names.pet) delete names.a;
-    const job = { id, number: ++seq, status: 'pending', theme: theme.slug, themeName: theme.name, variant, createdAt: Date.now(), attempts: 0, guestName: String(req.body.name || '').slice(0, 60), pad: String(req.body.pad || '').replace(/[^\w -]/g, '').slice(0, 16) || null, wantBot: Math.max(0, Math.min(8, +req.body.bot || 0)) || null, names: (names.a || names.b || names.pet) ? names : null, priority: 0 };
+    const job = { id, number: ++seq, status: 'pending', theme: theme.slug, themeName: theme.name, proportions: theme.proportions === 'bighead' ? 'bighead' : 'normal', variant, createdAt: Date.now(), attempts: 0, guestName: String(req.body.name || '').slice(0, 60), pad: String(req.body.pad || '').replace(/[^\w -]/g, '').slice(0, 16) || null, wantBot: Math.max(0, Math.min(8, +req.body.bot || 0)) || null, names: (names.a || names.b || names.pet) ? names : null, priority: 0 };
     if (payOn()) { job.status = 'unpaid'; job.pay = { size: null, label: null, amount: null, sessionId: null, url: null, paidAt: null, method: null }; } // waits on the pay screen until Stripe says it's paid
     fs.mkdirSync(path.join(JOBS, id), { recursive: true });
     // EXIF-rotate, limit size, save as jpg

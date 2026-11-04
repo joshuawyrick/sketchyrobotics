@@ -163,15 +163,19 @@
       <div class="body">
         <div class="row"><label>Reorder for shortest travel</label><input id="optOrder" type="checkbox" checked></div>
         <div class="row"><label>Join ends within</label><input id="optJoin" type="number" value="0.6" step="0.1"><span class="unit">mm</span></div>
-        <div class="row"><label>Curve point spacing</label><input id="optSeg" type="number" value="2" step="0.5" min="0.5"><span class="unit">mm</span></div>
-        <div class="row"><label>Max corner angle between points</label><input id="optTurn" type="number" value="6" step="1" min="1" max="30"><span class="unit">°</span></div>
+        <div class="row" style="display:none"><label>Curve point spacing</label><input id="optSeg" type="number" value="2" step="0.5" min="0.5"><span class="unit">mm</span></div>
+        <div class="row" style="display:none"><label>Max corner angle between points</label><input id="optTurn" type="number" value="6" step="1" min="1" max="30"><span class="unit">°</span></div>
         <div class="row"><label>Simplify tolerance (outside zone)</label><input id="optSimp" type="number" value="0.12" step="0.05"><span class="unit">mm</span></div>
         <div class="row"><label>Min line length (outside zone)</label><input id="optMin" type="number" value="1.5" step="0.5"><span class="unit">mm</span></div>
         <div class="row"><label>Min line length (in zone)</label><input id="optMinDetail" type="number" value="1" step="0.5"><span class="unit">mm</span></div>
-        <div class="row"><label>Pen speed in zone</label><input id="zoneSpeed" type="number" value="60" min="20" max="100" step="5"><span class="unit">%</span></div>
         <div class="row"><label>Simplify tolerance (in zone)</label><input id="optSimpDetail" type="number" value="0.08" step="0.02"><span class="unit">mm</span></div>
+        <div class="row"><label>Put the zone on the face(s) automatically</label><input id="zoneAuto" type="checkbox" checked></div>
+        <div class="row"><label>Zone depth from the top of the figure</label><select id="zoneDepth"><option value="auto" selected>Auto (normal / big head)</option><option value="15">15 %</option><option value="20">20 %</option><option value="25">25 %</option><option value="30">30 %</option><option value="35">35 %</option><option value="40">40 %</option><option value="50">50 %</option><option value="65">65 %</option></select></div>
         <div class="btns"><button id="btnZone">Detail zone: off</button><button id="btnZoneEdit" style="display:none">Move / resize zone</button></div>
-        <div class="note">Drag the detail zone over the face (eyes, nose, mouth): inside it every short line and fine curve is kept; outside it, hair wisps are dropped and curves are simplified.</div>
+        <div class="note">The detail zone (green) covers the face: inside it every short line is kept and the pen slows down; outside it, hair wisps are dropped. It sits on the head(s) automatically and moves with the drawing; drag it to adjust.</div>
+        <div class="row" style="margin-top:8px"><label>Preview: show lines left out (orange)</label><input id="showDropped" type="checkbox" checked></div>
+        <div class="row"><label>Preview: show the AI picture behind</label><input id="showSrc" type="checkbox"></div>
+        <div class="note">The black lines on the preview are exactly what the arm will draw, at the pen's real width.</div>
       </div>
       </div>
     </section>
@@ -180,6 +184,7 @@
       <div class="body">
         <div class="preset" data-group="speed"><select class="pSel"></select><button class="pSave" title="Save the current values under a new name">Save as…</button><button class="pUpd" title="Overwrite the selected saved preset with the values on screen">Update</button><button class="pDef" title="Load this preset automatically when the page opens">★ Default</button><button class="pDel" title="Delete this saved preset">Delete</button></div>
         <div class="row"><label>Draw speed</label><input id="spDraw" type="number" value="3500" step="500"><span class="unit">mm/min</span></div>
+        <div class="row"><label>Pen speed in the detail zone</label><input id="zoneSpeed" type="number" value="60" min="20" max="100" step="5"><span class="unit">%</span></div>
         <div class="row"><label>Travel speed</label><input id="spTravel" type="number" value="7000" step="500"><span class="unit">mm/min</span></div>
         <div class="row"><label>Pen lift speed</label><input id="spZ" type="number" value="2000" step="500"><span class="unit">mm/min</span></div>
         <div class="row"><label>Acceleration (draw)</label><input id="acc" type="number" value="400" step="100"><span class="unit">mm/s²</span></div>
@@ -206,7 +211,7 @@
     <canvas id="cv"></canvas>
     <div id="stats">no artwork</div>
     <div id="ctx"><button data-a="fit">Fit to page</button><button data-a="center">Center on page</button><button data-a="dup">Duplicate</button><button data-a="del">Delete</button></div>
-    <div id="hint">black = pen down · red dashes = travel · blue ring = arm reach · grey = paper, dashed = edge buffer · scroll to zoom, drag empty space to pan, double-click to re-center</div>
+    <div id="hint">black = exactly what the pen draws (real width) · orange = traced but left out · red dashes = travel · blue ring = arm reach · grey = paper, dashed = edge buffer · scroll to zoom, drag empty space to pan, double-click to re-center</div>
   </div>
 
   <!-- RIGHT: machine -->
@@ -746,11 +751,15 @@ window.DEXARM_PEN_OFFSET=114;
         while (stack.length) { const j = stack.pop(); const x = j % w, y = (j - x) / w; area++; sx += x; sy += y; if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y;
           for (const [dx, dy] of N8) { const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue; const k = yy * w + xx; if (b[k] && !lab[k]) { lab[k] = id; stack.push(k); } } }
         const bw = maxX - minX + 1, bh = maxY - minY + 1; const solid = area / (bw * bh);
-        if (bw <= maxD && bh <= maxD && solid > 0.55 && Math.max(bw, bh) / Math.min(bw, bh) < 2.2 && area >= 9) { // compact, round-ish, filled → a dot
+        if (bw <= maxD && bh <= maxD && solid > 0.68 && Math.max(bw, bh) / Math.min(bw, bh) < 1.5 && area >= 9) { // compact, round, solid → a dot (pupils, beauty marks); stubble clumps are too ragged or long to pass
           const cx = sx / area, cy = sy / area, r = Math.sqrt(area / Math.PI);
           for (let j = 0; j < b.length; j++) if (lab[j] === id) b[j] = 0; // not for the skeletonizer
           const circle = (rr, n) => { const pts = []; for (let k = 0; k <= n; k++) { const a = 2 * Math.PI * k / n; pts.push({ x: cx + rr * Math.cos(a), y: cy + rr * Math.sin(a) }); } return pts; };
-          dots.push(circle(Math.max(0.8, r - 1.2), 24)); if (r > 3.5) dots.push(circle(Math.max(0.6, (r - 1.2) * 0.5), 16)); if (r > 7) dots.push(circle((r - 1.2) * 0.75, 20)); } } }
+          // rings from the outside in, one pen-width apart, so the pen fills the dot without scribbling past its edge
+          const pen = opts.penPx || 3; let rr = Math.max(0.6, r - pen / 2); const ring = [];
+          for (let guard = 0; guard < 6 && rr > 0.5; guard++) { ring.push(circle(rr, Math.max(10, Math.min(32, Math.round(rr * 3))))); rr -= pen * 0.8; }
+          if (!ring.length) ring.push(circle(0.6, 10));
+          dots.push([].concat(...ring)); } } } // one pen-down per dot: the rings are joined, hopping inward
     // anything wider than the pen can cover in one pass (eyebrows, pupils, bold accents, beard shading) is drawn as its outline
     // plus hatch fill instead of a thinned centre-line, which comes out as a wandering, spurred knot
     let fills = [], thickMask = null;
@@ -777,7 +786,7 @@ window.DEXARM_PEN_OFFSET=114;
     const plen = p => { let L = 0; for (let i = 1; i < p.length; i++) L += Math.hypot(p[i].x - p[i - 1].x, p[i].y - p[i - 1].y); return L; };
     const prunePx = opts.prunePx == null ? 10 : opts.prunePx;
     const before = polylines.length;
-    polylines = polylines.filter(p => p.dot || p.fill || !(p.dangling && plen(p) < prunePx) );
+    polylines = polylines.filter(p => p.dot === true || p.fill === true || !(p.dangling && plen(p) < prunePx) ); // === true: every array has a built-in .fill() method, so a bare p.fill is always truthy
     return { polylines, binary: bin, skeleton: b, width: w, height: h, inkFraction, pruned: before - polylines.length };
   }
 
@@ -830,6 +839,7 @@ window.DEXARM_PEN_OFFSET=114;
       if (closed) { const n = a.length; b[0].x = b[n - 1].x = 0.25 * a[n - 2].x + 0.5 * a[0].x + 0.25 * a[1].x; b[0].y = b[n - 1].y = 0.25 * a[n - 2].y + 0.5 * a[0].y + 0.25 * a[1].y; }
       a = b;
     }
+    if (a !== pts) for (const f of ['dot', 'fill', 'dangling']) if (pts[f] === true) a[f] = true;
     return a;
   }
 
@@ -863,6 +873,16 @@ window.DEXARM_PEN_OFFSET=114;
     return out;
   }
   function length(p) { let L = 0; for (let i = 1; i < p.length; i++) L += dist(p[i], p[i - 1]); return L; }
+
+  /** for each stroke: does either end touch (within tol) some other stroke anywhere along it? (grid of segments, cell = tol) */
+  function connectedEnds(strokes, tol) {
+    const cell = Math.max(tol, 0.2), grid = new Map(), key = (x, y) => Math.floor(x / cell) + ',' + Math.floor(y / cell);
+    strokes.forEach((p, i) => { for (let j = 1; j < p.length; j++) { const a = p[j - 1], b = p[j]; const x0 = Math.floor(Math.min(a.x, b.x) / cell), x1 = Math.floor(Math.max(a.x, b.x) / cell), y0 = Math.floor(Math.min(a.y, b.y) / cell), y1 = Math.floor(Math.max(a.y, b.y) / cell);
+      if ((x1 - x0 + 1) * (y1 - y0 + 1) > 400) continue; for (let gx = x0; gx <= x1; gx++) for (let gy = y0; gy <= y1; gy++) { const k = gx + ',' + gy; let l = grid.get(k); if (!l) grid.set(k, l = []); l.push(i, j); } } });
+    const segDist = (q, a, b) => { const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy; const t = L2 ? Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / L2)) : 0; return Math.hypot(q.x - a.x - t * dx, q.y - a.y - t * dy); };
+    const near = (q, self) => { const cx = Math.floor(q.x / cell), cy = Math.floor(q.y / cell); for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) { const l = grid.get((cx + dx) + ',' + (cy + dy)); if (!l) continue; for (let k = 0; k < l.length; k += 2) { if (l[k] === self) continue; const p = strokes[l[k]]; if (segDist(q, p[l[k + 1] - 1], p[l[k + 1]]) <= tol) return true; } } return false; };
+    return strokes.map((p, i) => near(p[0], i) || near(p[p.length - 1], i));
+  }
 
   // Join strokes end-to-end when ends are within tol. Endpoints are bucketed in a grid, so this is
   // linear-ish even with tens of thousands of strokes.
@@ -955,14 +975,21 @@ window.DEXARM_PEN_OFFSET=114;
     const z = o.detail; // { minX, maxX, minY, maxY, minMm, simplifyMm } — inside the zone: shorter minimum, finer simplification
     const inZone = p => { if (!z) return false; let n = 0; for (const q of p) if (q.x >= z.minX && q.x <= z.maxX && q.y >= z.minY && q.y <= z.maxY) n++; return n >= p.length / 2; };
     // simplify AFTER joining so joints don't leave stubs; detail-zone strokes keep much finer tolerance
-    s = s.map(p => { const tol = inZone(p) ? (z.simplifyMm != null ? z.simplifyMm : o.simplifyMm) : o.simplifyMm; const r = resample(dedupe(p, 0.05), o.maxTurnDeg || 6, o.maxSegMm || 2.5); return simplify(r, Math.min(tol, 0.05)); });
-    s = s.filter(p => { const L = length(p); return L >= o.minStrokeMm || (inZone(p) && L >= z.minMm); });
+    // Plain RDP on the dense, smoothed trace: no point of the drawn line strays more than `eps` from the traced one.
+    // (The old curvature resampler turned a 1 mm-radius curve into a triangle — eyelids, nostrils and pupils came out as polygons.)
+    s = s.map(p => { const zin = inZone(p); const tol = zin ? (z.simplifyMm != null ? z.simplifyMm : o.simplifyMm) : o.simplifyMm; const out = simplify(dedupe(p, 0.02), Math.min(tol, zin ? 0.03 : 0.05)); if (p.dot === true) out.dot = true; return out; });
+    // Short strokes: one standing on its own is a wisp the pen can only tap as a dot — drop it under the minimum length.
+    // One that touches another line is part of a shape (an iris, a lid, a nostril) — keep it, however short.
+    const touching = connectedEnds(s, Math.max(0.35, o.joinMm || 0));
+    s = s.filter((p, i) => { if (p.dot === true) return true; const L = length(p); if (L >= o.minStrokeMm || (inZone(p) && L >= z.minMm)) return true; return L >= 0.25 && touching[i]; });
     if (o.optimize) s = order(s, o.start);
     // stats
     let ink = 0, travel = 0, cur = o.start;
     for (const p of s) { travel += dist(cur, p[0]); ink += length(p); cur = p[p.length - 1]; }
     return { strokes: s, ink, travel, lifts: s.length, bounds: bounds(s) };
   }
+
+  function strokeSpeed(s, o) { let F = o.drawSpeed || 6000; if (o.zone && o.zoneSpeed && o.zoneSpeed < 1) { const z = o.zone; let inside = 0; for (const q of s) if (q.x >= z.minX && q.x <= z.maxX && q.y >= z.minY && q.y <= z.maxY) inside++; if (inside * 2 >= s.length) F *= o.zoneSpeed; } return F; }
 
   /** G-code. o: { drawSpeed, travelSpeed, zSpeed, penDownZ, penUpZ, accel, travelAccel, jerk, fastTravel, header, footer, decimals } */
   function toGcode(p, o) {
@@ -990,7 +1017,7 @@ window.DEXARM_PEN_OFFSET=114;
       if (first) { g.push(`G0 Z${f(o.penUpZ)} F${Math.round(o.zSpeed)}`); first = false; }
       g.push(`G1 Z${f(o.penDownZ)} F${Math.round(o.zSpeed)}`);
       // inside the detail zone the pen moves slower (eyes, mouth): less ringing on tight curves
-      let F = o.drawSpeed; if (o.zone && o.zoneSpeed && o.zoneSpeed < 1) { const z = o.zone; let inside = 0; for (const q of s) if (q.x >= z.minX && q.x <= z.maxX && q.y >= z.minY && q.y <= z.maxY) inside++; if (inside * 2 >= s.length) F = o.drawSpeed * o.zoneSpeed; }
+      const F = strokeSpeed(s, o);
       g.push(`G1 X${f(s[1].x)} Y${f(s[1].y)} F${Math.round(F)}`);
       for (let i = 2; i < s.length; i++) g.push(`G1 X${f(s[i].x)} Y${f(s[i].y)}`);
       g.push(`G0 Z${f(o.penUpZ)} F${Math.round(o.zSpeed)}`);
@@ -1010,14 +1037,14 @@ window.DEXARM_PEN_OFFSET=114;
     for (const s of p.strokes) {
       t += segT(dist(cur, s[0]), vt, at);
       // inside a stroke lookahead keeps speed up; approximate with whole-stroke trapezoid plus corner slowdowns
-      t += segT(length(s), v, a) + (s.length - 2) * 0.01;
+      t += segT(length(s), strokeSpeed(s, o) / 60, a) + (s.length - 2) * 0.01;
       t += 2 * segT(zL, vz, a);
       cur = s[s.length - 1];
     }
     return t;
   }
 
-  return { plan, toGcode, simplify, smooth, resample, joinStrokes, order, bounds, length, estimateSeconds };
+  return { plan, toGcode, simplify, smooth, resample, joinStrokes, order, bounds, length, estimateSeconds, strokeSpeed };
 });
 
 </script>
@@ -1204,7 +1231,7 @@ window.DEXARM_PEN_OFFSET=114;
 
   // ---------- persistence ----------
   const PERSIST = ['imgMode', 'imgThr', 'imgInv', 'imgRes', 'imgSpeck', 'imgPrune', 'imgSmooth', 'imgBlur', 'paper', 'orient', 'margin', 'paperX', 'paperY',
-    'optOrder', 'optJoin', 'optSeg', 'optTurn', 'optSimp', 'optMin', 'optMinDetail', 'optSimpDetail', 'zoneSpeed', 'imgDots', 'penW', 'fillX', 'spDraw', 'spTravel', 'spZ', 'acc', 'accT', 'jerk', 'fastTravel', 'inflight', 'zDown', 'zLift', 'zSafe', 'jogStep', 'jogSpeed', 'qPause', 'qPreview', 'qPreviewSecs', 'qSize', 'qSizeCustom', 'qPlace', 'qNames', 'qNamePos', 'qNameFont', 'qNameH'];
+    'optOrder', 'optJoin', 'optSeg', 'optTurn', 'optSimp', 'optMin', 'optMinDetail', 'optSimpDetail', 'zoneSpeed', 'imgDots', 'penW', 'fillX', 'spDraw', 'spTravel', 'spZ', 'acc', 'accT', 'jerk', 'fastTravel', 'inflight', 'zDown', 'zLift', 'zSafe', 'jogStep', 'jogSpeed', 'qPause', 'qPreview', 'qPreviewSecs', 'qSize', 'qSizeCustom', 'qPlace', 'qNames', 'qNamePos', 'qNameFont', 'qNameH', 'zoneAuto', 'zoneDepth', 'showDropped', 'showSrc'];
   // ---- which robot is this tab? (one Studio tab per arm; /studio/?bot=3 or the header dropdown) ----
   const BOT = Math.max(1, Math.min(8, +(new URLSearchParams(location.search).get('bot') || sessionStorage.getItem('dexdraw.bot') || 1)));
   try { sessionStorage.setItem('dexdraw.bot', BOT); } catch (_) { }
@@ -1262,9 +1289,10 @@ window.DEXARM_PEN_OFFSET=114;
   fileIn.addEventListener('change', () => { for (const f of fileIn.files) loadFile(f); fileIn.value = ''; });
   window.addEventListener('paste', e => { const f = [...(e.clipboardData.files || [])][0]; if (f) loadFile(f); });
 
-  async function loadFromUrl(url, name) { const b = await fetch(url).then(r => { if (!r.ok) throw new Error('fetch ' + r.status); return r.blob(); }); const f = new File([b], name || 'queue.png', { type: b.type || 'image/png' }); for (const o of S.objects.slice()) deleteObj(o); await loadFile(f); }
+  async function loadFromUrl(url, name) { const b = await fetch(url).then(r => { if (!r.ok) throw new Error('fetch ' + r.status); return r.blob(); }); const f = new File([b], name || 'queue.png', { type: b.type || 'image/png' }); f.fromQueue = true; for (const o of S.objects.slice()) deleteObj(o); await loadFile(f); }
   async function loadFile(f) {
     const name = f.name || 'pasted';
+    if (!f.fromQueue) S.nextProportions = /big\s*-?\s*head/i.test(name) ? 'bighead' : 'normal'; // queue jobs say which (from the theme)
     let obj;
     if (/\.svg$/i.test(name) || f.type === 'image/svg+xml') {
       const text = await f.text();
@@ -1280,7 +1308,7 @@ window.DEXARM_PEN_OFFSET=114;
     obj.id = nextId++; obj.rot = 0; obj.mirror = false; obj.x = 0; obj.y = 0; obj.w = 10; obj.h = 10; obj.placed = [];
     fitToPage(obj);
     S.objects.push(obj); select(obj);
-    if (obj.kind === 'image') { if (!S.zone) { S.zone = { x: obj.x, y: obj.y + obj.h * 0.08, w: obj.w * 0.55, h: obj.h * 0.42 }; S.zoneEdit = false; syncZoneButtons(); } retrace(obj); } else refresh();
+    if (obj.kind === 'image') { S.zoneEdit = false; syncZoneButtons(); retrace(obj); } else refresh();
   }
 
   // tracing runs in a Web Worker so a big photo can never freeze the page
@@ -1308,12 +1336,13 @@ window.DEXARM_PEN_OFFSET=114;
     $('fileInfo').textContent = `${obj.name}: tracing ${w}×${h}px…`;
     if (worker) { worker.terminate(); worker = null; }
     const src = await traceSource();
-    worker = new Worker(URL.createObjectURL(new Blob([src + '\nself.onmessage=e=>{const r=ImageTrace.trace(e.data.img,e.data.opts);self.postMessage({polylines:r.polylines,inkFraction:r.inkFraction,fills:r.polylines.filter(p=>p.fill).length});};'], { type: 'text/javascript' })));
+    worker = new Worker(URL.createObjectURL(new Blob([src + '\nself.onmessage=e=>{const r=ImageTrace.trace(e.data.img,e.data.opts);self.postMessage({polylines:r.polylines,inkFraction:r.inkFraction,fills:r.polylines.filter(p=>p.fill===true).length});};'], { type: 'text/javascript' })));
     const t0 = performance.now();
     worker.onmessage = ev => {
       if (seq !== traceSeq) { if (resolve) resolve(); return; }
       const r = ev.data;
-      obj.raw = r.polylines; obj.polylines = r.polylines.map(p => p.dot ? p : Planner.smooth(p, p.fill ? 2 : Math.round(num('imgSmooth') * Math.max(1, k)))); obj.sw = w; obj.sh = h;
+      obj.raw = r.polylines; obj.traceK = k; obj.polylines = smoothTraced(obj); obj.sw = w; obj.sh = h;
+      if (!S.zoneOff && obj === zoneAnchor() && !obj.zoneManual) S.zoneRel = $('zoneAuto').checked ? autoZoneRel(obj) : (S.zoneRel || ZONE_DEFAULT); syncZoneButtons();
       let info = `${obj.name}: ${w}×${h}px → ${r.polylines.length} strokes (${((performance.now() - t0) / 1000).toFixed(1)} s)`;
       if (r.inkFraction > 0.35) info += ' — ⚠ mostly solid dark area, not line art. Try "Edges (photos)" or raise the threshold.';
       else if (r.polylines.length > 15000) info += ' — ⚠ very busy; lower the working resolution or raise "drop specks".';
@@ -1327,7 +1356,8 @@ window.DEXARM_PEN_OFFSET=114;
   $('imgThr').addEventListener('input', () => { $('thrV').textContent = $('imgThr').value; });
   $('imgThr').addEventListener('change', () => retrace());
   for (const id of ['imgMode', 'imgInv', 'imgRes', 'imgSpeck', 'imgPrune', 'imgBlur', 'imgDots', 'penW', 'fillX']) $(id).addEventListener('change', () => retrace());
-  $('imgSmooth').addEventListener('change', () => { for (const o of S.objects) if (o.raw) o.polylines = o.raw.map(p => Planner.smooth(p, num('imgSmooth'))); refresh(); });
+  function smoothTraced(o) { const k = Math.max(1, o.traceK || 1); return o.raw.map(p => p.dot === true ? p : Planner.smooth(p, p.fill === true ? 2 : Math.round(num('imgSmooth') * k))); }
+  $('imgSmooth').addEventListener('change', () => { for (const o of S.objects) if (o.raw) o.polylines = smoothTraced(o); refresh(); });
   $('btnRetrace').addEventListener('click', () => retrace());
   $('btnDlSvg').addEventListener('click', () => {
     const o = S.selected; if (!o) return;
@@ -1353,11 +1383,11 @@ window.DEXARM_PEN_OFFSET=114;
     const sw = o.sw, sh = o.sh, rr = o.rot * Math.PI / 180, cs = Math.cos(rr), sn = Math.sin(rr);
     const rw = rotated(o) ? sh : sw, rh = rotated(o) ? sw : sh;
     const sx = o.w / rw, sy = o.h / rh;
-    o.placed = o.polylines.map(p => p.map(q => {
+    o.placed = o.polylines.map(p => { const a = p.map(q => {
       let x = q.x - sw / 2, y = -(q.y - sh / 2); if (o.mirror) x = -x;
       const xr = x * cs - y * sn, yr = x * sn + y * cs;
       return { x: o.x + xr * sx, y: o.y + yr * sy };
-    }));
+    }); if (p.dot === true) a.dot = true; if (p.fill === true) a.fill = true; return a; });
   }
   function bbox(o) { return { minX: o.x - o.w / 2, maxX: o.x + o.w / 2, minY: o.y - o.h / 2, maxY: o.y + o.h / 2 }; }
 
@@ -1385,7 +1415,7 @@ window.DEXARM_PEN_OFFSET=114;
 
   // ---------- planning (debounced) ----------
   let planTimer = null;
-  function refresh() { for (const o of S.objects) placeObject(o); S.planDirty = true; S.gcode = ''; syncPanel(); draw(); clearTimeout(planTimer); planTimer = setTimeout(replan, 120); }
+  function refresh() { for (const o of S.objects) placeObject(o); zoneFromRel(); S.planDirty = true; S.gcode = ''; syncPanel(); draw(); clearTimeout(planTimer); planTimer = setTimeout(replan, 120); }
   function replan() {
     const all = []; for (const o of S.objects) for (const p of o.placed) all.push(p);
     const z = S.zone ? { minX: S.zone.x - S.zone.w / 2, maxX: S.zone.x + S.zone.w / 2, minY: S.zone.y - S.zone.h / 2, maxY: S.zone.y + S.zone.h / 2, minMm: num('optMinDetail'), simplifyMm: num('optSimpDetail') } : null;
@@ -1393,11 +1423,38 @@ window.DEXARM_PEN_OFFSET=114;
     S.planDirty = false; checkLimits(); updateButtons(); draw();
   }
   for (const id of ['optOrder', 'optJoin', 'optSeg', 'optTurn', 'optSimp', 'optMin', 'optMinDetail', 'optSimpDetail', 'zDown']) $(id).addEventListener('change', refresh);
-  // detail zone
-  S.zone = null; S.zoneEdit = false;
+  // detail zone — kept as a fraction of the drawing (S.zoneRel: x0..x1, y0..y1 of the image, y down) so it follows the drawing
+  S.zone = null; S.zoneEdit = false; S.zoneRel = null; S.zoneOff = false;
+  const ZONE_DEFAULT = { x0: 0.225, x1: 0.775, y0: 0.21, y1: 0.63 }; // head-and-shoulders guess when there's nothing to measure
+  const zoneAnchor = () => S.objects.find(x => x.kind === 'image') || S.objects.find(x => x.kind !== 'text') || null;
+  function objToWorld(o, fx, fy) { // image fraction -> machine mm (same transform as placeObject)
+    const sw = o.sw, sh = o.sh, rr = o.rot * Math.PI / 180, cs = Math.cos(rr), sn = Math.sin(rr), rw = rotated(o) ? sh : sw, rh = rotated(o) ? sw : sh, sx = o.w / rw, sy = o.h / rh;
+    let x = fx * sw - sw / 2, y = -(fy * sh - sh / 2); if (o.mirror) x = -x; return { x: o.x + (x * cs - y * sn) * sx, y: o.y + (x * sn + y * cs) * sy }; }
+  function worldToObj(o, X, Y) { // machine mm -> image fraction
+    const sw = o.sw, sh = o.sh, rr = o.rot * Math.PI / 180, cs = Math.cos(rr), sn = Math.sin(rr), rw = rotated(o) ? sh : sw, rh = rotated(o) ? sw : sh, sx = o.w / rw, sy = o.h / rh;
+    const xr = (X - o.x) / sx, yr = (Y - o.y) / sy; let x = xr * cs + yr * sn; const y = -xr * sn + yr * cs; if (o.mirror) x = -x; return { fx: (x + sw / 2) / sw, fy: (sh / 2 - y) / sh }; }
+  function zoneFromRel() { const o = zoneAnchor(); if (S.zoneOff || !S.zoneRel || !o) return; const r = S.zoneRel;
+    const c = [objToWorld(o, r.x0, r.y0), objToWorld(o, r.x1, r.y0), objToWorld(o, r.x0, r.y1), objToWorld(o, r.x1, r.y1)], xs = c.map(q => q.x), ys = c.map(q => q.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys); S.zone = { x: (minX + maxX) / 2, y: (minY + maxY) / 2, w: maxX - minX, h: maxY - minY }; }
+  function zoneToRel() { const o = zoneAnchor(), z = S.zone; if (!o || !z) return; const a = worldToObj(o, z.x - z.w / 2, z.y + z.h / 2), b = worldToObj(o, z.x + z.w / 2, z.y - z.h / 2);
+    S.zoneRel = { x0: Math.min(a.fx, b.fx), x1: Math.max(a.fx, b.fx), y0: Math.min(a.fy, b.fy), y1: Math.max(a.fy, b.fy) }; o.zoneManual = true; }
+  /** the head(s) sit at the top of the figure: a band from the top of the ink down `depth` of its height, as wide as whatever is up there plus a margin */
+  function autoZoneRel(o) {
+    const P = o.raw || o.polylines, w = o.sw, h = o.sh; if (!P || !P.length) return ZONE_DEFAULT;
+    let minY = Infinity, maxY = -Infinity; for (const p of P) for (const q of p) { if (q.y < minY) minY = q.y; if (q.y > maxY) maxY = q.y; }
+    const H = maxY - minY; if (!(H > 0)) return ZONE_DEFAULT;
+    const v = $('zoneDepth').value, depth = v === 'auto' ? (S.nextProportions === 'bighead' ? 0.42 : 0.24) : +v / 100;
+    const yHead = minY + H * depth * 0.5; let minX = Infinity, maxX = -Infinity; // width: whatever ink is in the top half of the band (the heads)
+    for (const p of P) for (const q of p) if (q.y <= yHead) { if (q.x < minX) minX = q.x; if (q.x > maxX) maxX = q.x; }
+    if (!isFinite(minX)) return ZONE_DEFAULT; const m = Math.max((maxX - minX) * 0.25, w * 0.03);
+    return { x0: Math.max(0, (minX - m) / w), x1: Math.min(1, (maxX + m) / w), y0: Math.max(0, (minY - H * 0.02) / h), y1: Math.min(1, (minY + H * depth) / h) };
+  }
+  function reAutoZone() { const o = zoneAnchor(); if (!o || S.zoneOff) return; o.zoneManual = false; S.zoneRel = $('zoneAuto').checked && o.raw ? autoZoneRel(o) : (S.zoneRel || ZONE_DEFAULT); syncZoneButtons(); refresh(); }
+  for (const id of ['zoneAuto', 'zoneDepth']) $(id).addEventListener('change', reAutoZone);
+  for (const id of ['showDropped', 'showSrc']) $(id).addEventListener('change', () => draw());
   $('btnZone').addEventListener('click', () => {
-    if (S.zone) { S.zone = null; S.zoneEdit = false; }
-    else { const o = S.selected || S.objects[0]; const P = paper(); S.zone = o ? { x: o.x, y: o.y + o.h * 0.05, w: o.w * 0.5, h: o.h * 0.45 } : { x: P.cx, y: P.cy, w: 60, h: 60 }; S.zoneEdit = true; }
+    if (S.zone) { S.zone = null; S.zoneRel = null; S.zoneOff = true; S.zoneEdit = false; }
+    else { S.zoneOff = false; const o = zoneAnchor(); if (o) { o.zoneManual = false; S.zoneRel = $('zoneAuto').checked && o.raw ? autoZoneRel(o) : ZONE_DEFAULT; } else { const P = paper(); S.zone = { x: P.cx, y: P.cy, w: 60, h: 60 }; } S.zoneEdit = true; }
     syncZoneButtons(); refresh();
   });
   $('btnZoneEdit').addEventListener('click', () => { S.zoneEdit = !S.zoneEdit; syncZoneButtons(); draw(); });
@@ -1417,17 +1474,18 @@ window.DEXARM_PEN_OFFSET=114;
 
   // ---------- named presets (speed, conversion) ----------
   const GROUPS = {
-    speed: { fields: ['spDraw', 'spTravel', 'spZ', 'acc', 'accT', 'jerk', 'fastTravel', 'inflight', 'jogSpeed', 'jogStep', 'zLift', 'zSafe'],
+    speed: { fields: ['spDraw', 'zoneSpeed', 'spTravel', 'spZ', 'acc', 'accT', 'jerk', 'fastTravel', 'inflight', 'jogSpeed', 'jogStep', 'zLift', 'zSafe'],
       builtin: {
-        'Quality (default)': { spDraw: 3500, spTravel: 7000, spZ: 2000, acc: 400, accT: 1000, jerk: 5, fastTravel: false, inflight: 4, jogSpeed: 6000, jogStep: 10, zLift: 5, zSafe: 20 },
-        'Ultra (slow, most precise)': { spDraw: 2500, spTravel: 7000, spZ: 1500, acc: 300, accT: 1000, jerk: 4, fastTravel: false, inflight: 4, jogSpeed: 6000, jogStep: 10, zLift: 5, zSafe: 20 },
-        'Smooth': { spDraw: 6000, spTravel: 7000, spZ: 2000, acc: 600, accT: 1000, jerk: 8, fastTravel: false, inflight: 4, jogSpeed: 6000, jogStep: 10, zLift: 5, zSafe: 20 },
-        'Fast': { spDraw: 6000, spTravel: 12000, spZ: 4000, acc: 1200, accT: 2000, jerk: 8, fastTravel: false, inflight: 4, jogSpeed: 6000, zLift: 5 },
-        'Faster': { spDraw: 10000, spTravel: 15000, spZ: 5000, acc: 2000, accT: 3000, jerk: 10, fastTravel: false, inflight: 4, jogSpeed: 8000, zLift: 5 },
-        'Max': { spDraw: 18000, spTravel: 18000, spZ: 6000, acc: 3000, accT: 3000, jerk: 15, fastTravel: false, inflight: 4, jogSpeed: 8000, zLift: 4 },
-        'Rotrics Studio stock': { spDraw: 2000, spTravel: 4000, spZ: 1500, acc: 60, accT: 60, jerk: 10, fastTravel: false, inflight: 3, jogSpeed: 4000, zLift: 10 }
+        'Event — fast body, careful face': { spDraw: 6000, zoneSpeed: 35, spTravel: 9000, spZ: 3000, acc: 700, accT: 1500, jerk: 6, fastTravel: false, inflight: 4, jogSpeed: 6000, jogStep: 10, zLift: 3, zSafe: 20 },
+        'Quality (default)': { zoneSpeed: 60, spDraw: 3500, spTravel: 7000, spZ: 2000, acc: 400, accT: 1000, jerk: 5, fastTravel: false, inflight: 4, jogSpeed: 6000, jogStep: 10, zLift: 5, zSafe: 20 },
+        'Ultra (slow, most precise)': { zoneSpeed: 50, spDraw: 2500, spTravel: 7000, spZ: 1500, acc: 300, accT: 1000, jerk: 4, fastTravel: false, inflight: 4, jogSpeed: 6000, jogStep: 10, zLift: 5, zSafe: 20 },
+        'Smooth': { zoneSpeed: 50, spDraw: 6000, spTravel: 7000, spZ: 2000, acc: 600, accT: 1000, jerk: 8, fastTravel: false, inflight: 4, jogSpeed: 6000, jogStep: 10, zLift: 5, zSafe: 20 },
+        'Fast': { zoneSpeed: 45, spDraw: 6000, spTravel: 12000, spZ: 4000, acc: 1200, accT: 2000, jerk: 8, fastTravel: false, inflight: 4, jogSpeed: 6000, zLift: 5 },
+        'Faster': { zoneSpeed: 40, spDraw: 10000, spTravel: 15000, spZ: 5000, acc: 2000, accT: 3000, jerk: 10, fastTravel: false, inflight: 4, jogSpeed: 8000, zLift: 5 },
+        'Max': { zoneSpeed: 35, spDraw: 18000, spTravel: 18000, spZ: 6000, acc: 3000, accT: 3000, jerk: 15, fastTravel: false, inflight: 4, jogSpeed: 8000, zLift: 4 },
+        'Rotrics Studio stock': { zoneSpeed: 100, spDraw: 2000, spTravel: 4000, spZ: 1500, acc: 60, accT: 60, jerk: 10, fastTravel: false, inflight: 3, jogSpeed: 4000, zLift: 10 }
       }, after: () => { S.gcode = ''; updateButtons(); draw(); } },
-    conv: { fields: ['imgMode', 'imgThr', 'imgInv', 'imgRes', 'imgSpeck', 'imgSmooth', 'imgPrune', 'imgBlur', 'imgDots', 'penW', 'fillX', 'optOrder', 'optJoin', 'optSeg', 'optTurn', 'optSimp', 'optMin', 'optMinDetail', 'optSimpDetail', 'zoneSpeed'],
+    conv: { fields: ['imgMode', 'imgThr', 'imgInv', 'imgRes', 'imgSpeck', 'imgSmooth', 'imgPrune', 'imgBlur', 'imgDots', 'penW', 'fillX', 'optOrder', 'optJoin', 'optSeg', 'optTurn', 'optSimp', 'optMin', 'optMinDetail', 'optSimpDetail'],
       builtin: {
         'AI line art — full figure (default)': { imgMode: 'ink', imgThr: 187, imgInv: false, imgRes: 2800, imgSpeck: 11, imgSmooth: 5, imgPrune: 4, imgBlur: false, optOrder: true, optJoin: 0.6, optSeg: 2, optTurn: 6, optSimp: 0.12, optMin: 1.5, optMinDetail: 1, optSimpDetail: 0.08, imgDots: true, zoneSpeed: 60, penW: 0.5, fillX: 2 },
         'AI line art — ultra detail (slow)': { imgMode: 'ink', imgThr: 187, imgInv: false, imgRes: 3100, imgSpeck: 9, imgSmooth: 5, imgPrune: 3, imgBlur: false, imgDots: true, optOrder: true, optJoin: 0.6, optSeg: 1.5, optTurn: 5, optSimp: 0.1, optMin: 1.0, optMinDetail: 0.8, optSimpDetail: 0.06, zoneSpeed: 50, penW: 0.5, fillX: 1.5 },
@@ -1644,9 +1702,9 @@ window.DEXARM_PEN_OFFSET=114;
       o.x = drag.anchor.x + (w.x >= drag.anchor.x ? nw / 2 : -nw / 2); o.y = drag.anchor.y + (w.y >= drag.anchor.y ? nh / 2 : -nh / 2);
       constrain(o);
     }
-    placeObject(o); S.planDirty = true; S.gcode = ''; syncPanel(); draw();
+    placeObject(o); zoneFromRel(); S.planDirty = true; S.gcode = ''; syncPanel(); draw();
   });
-  window.addEventListener('mouseup', () => { if (drag && drag.kind !== 'pan') refresh(); drag = null; });
+  window.addEventListener('mouseup', () => { if (drag && (drag.kind === 'zmove' || drag.kind === 'zresize')) zoneToRel(); if (drag && drag.kind !== 'pan') refresh(); drag = null; });
   syncZoneButtons();
   // context menu
   const ctxm = $('ctx');
@@ -1694,11 +1752,15 @@ window.DEXARM_PEN_OFFSET=114;
       for (const st of S.plan.strokes) { let a = toScreen(cur.x, cur.y); ctx.moveTo(...a); a = toScreen(st[0].x, st[0].y); ctx.lineTo(...a); cur = st[st.length - 1]; }
       ctx.stroke(); ctx.setLineDash([]);
     }
-    // ink per object
+    // ink: once the plan is current this is exactly what the G-code draws, at the pen's real width; traced lines the planner leaves out show in red
+    const penPx = Math.max(1, num('penW') * s), planOk = !!(S.plan && !S.planDirty);
+    const path = list => { ctx.beginPath(); for (const st of list) { let a = toScreen(st[0].x, st[0].y); ctx.moveTo(...a); for (let i = 1; i < st.length; i++) { a = toScreen(st[i].x, st[i].y); ctx.lineTo(...a); } } };
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    if ($('showSrc').checked) for (const o of S.objects) if (o.kind === 'image' && o.img) { // the AI picture, faint, exactly under its lines
+      const [cx, cy] = toScreen(o.x, o.y), k = o.w / (rotated(o) ? o.sh : o.sw) * s; ctx.save(); ctx.globalAlpha = 0.28; ctx.translate(cx, cy); ctx.rotate(-o.rot * Math.PI / 180); ctx.scale(k * (o.mirror ? -1 : 1), k); ctx.drawImage(o.img, -o.sw / 2, -o.sh / 2, o.sw, o.sh); ctx.restore(); }
+    for (const o of S.objects) { if (planOk && !$('showDropped').checked) break; ctx.strokeStyle = planOk ? 'rgba(245,140,0,.75)' : '#9aa3b2'; ctx.lineWidth = planOk ? penPx * 0.85 : penPx; path(o.placed || []); ctx.stroke(); }
+    if (planOk) { ctx.strokeStyle = '#0a0a0a'; ctx.lineWidth = penPx; path(S.plan.strokes); ctx.stroke(); }
     for (const o of S.objects) {
-      ctx.strokeStyle = o === S.selected ? '#0a0a0a' : '#4b5563'; ctx.lineWidth = Math.max(1, 0.45 * s); ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.beginPath();
-      for (const st of o.placed || []) { let a = toScreen(st[0].x, st[0].y); ctx.moveTo(...a); for (let i = 1; i < st.length; i++) { a = toScreen(st[i].x, st[i].y); ctx.lineTo(...a); } }
-      ctx.stroke();
       const b = bbox(o); const [bx, by] = toScreen(b.minX, b.maxY);
       ctx.strokeStyle = o === S.selected ? '#006df6' : 'rgba(0,109,246,.35)'; ctx.lineWidth = 1; ctx.setLineDash(o === S.selected ? [] : [2, 3]); ctx.strokeRect(bx, by, o.w * s, o.h * s); ctx.setLineDash([]);
       if (o === S.selected) { ctx.fillStyle = '#006df6'; for (const [x, y] of [[b.minX, b.maxY], [b.maxX, b.maxY], [b.minX, b.minY], [b.maxX, b.minY]]) { const [hx, hy] = toScreen(x, y); ctx.fillRect(hx - 5, hy - 5, 10, 10); } }
@@ -1769,6 +1831,7 @@ window.DEXARM_PEN_OFFSET=114;
     try {
       let wait, since; ({ job, wait, since } = await qFetch('/api/queue/claim', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bot: BOT }) })); if (!job) { if (wait === 'paper') { $('qStatus').textContent = 'waiting for the guest to put in fresh paper (' + Math.round((Date.now() - since) / 1000) + ' s)… or press "Paper is in" if you changed it yourself'; $('btnQPaper').style.display = ''; } else { $('qStatus').textContent = 'Nothing ready yet — it loads as soon as a guest\'s sketch is finished.'; $('btnQPaper').style.display = 'none'; } return false; } $('btnQPaper').style.display = 'none';
       Q.current = job; $('qStatus').textContent = `#${job.number} ${job.themeName}: converting…`;
+      S.nextProportions = job.proportions || (/big\s*-?\s*head/i.test(job.themeName || '') ? 'bighead' : 'normal');
       await loadFromUrl(`/api/jobs/${job.id}/art`, `queue-${job.number}.png`);
       await new Promise(r => setTimeout(r, 400)); for (let i = 0; i < 100 && (S.planDirty || !S.plan); i++) await new Promise(r => setTimeout(r, 200)); // trace worker + planner
       const label = nameLabel(job.names); if (label && $('qNames').checked) { const t = textObject(label, $('qNameFont').value, num('qNameH')); S.objects.push(t); log(`name lettering: "${label}"`); }
