@@ -108,6 +108,14 @@
   <aside>
     <div id="serialWarn" class="warn" style="display:none">This browser can't talk to USB devices. Open this page in <b>Google Chrome</b> or <b>Microsoft Edge</b> on a computer (not a phone).</div>
     <section>
+      <h2>Drawing preset <span class="note" style="margin-left:auto">speed + trace settings in one pick</span></h2>
+      <div class="body">
+        <div class="preset" data-group="draw"><select class="pSel"></select><button class="pSave" title="Save every speed + trace setting on screen under a new name">Save as…</button><button class="pUpd" title="Overwrite the selected saved preset with the values on screen">Update</button><button class="pDef" title="Load this preset automatically every time Studio opens on this computer">★ Default</button><button class="pDel" title="Delete this saved preset">Delete</button></div>
+        <div class="note" id="drawBlurb" style="margin-top:6px"></div>
+        <div class="note">Numbers match the Sketchy Lab preset test. ★ marks the default, which loads every time Studio opens on this computer. The Conversion and Speed menus below still fine-tune either half.</div>
+      </div>
+    </section>
+    <section>
       <h2>1 · Artwork</h2>
       <div class="body">
         <div id="drop"><b>Drop a PNG / JPG / SVG here</b><br>or click to choose a file<input id="file" type="file" accept=".svg,.png,.jpg,.jpeg,.gif,.bmp,.webp,image/*" style="display:none"></div>
@@ -1495,6 +1503,25 @@ window.DEXARM_PEN_OFFSET=114;
         'Photo (edges)': { imgMode: 'edge', imgThr: 150, imgInv: false, imgRes: 1200, imgSpeck: 25, imgSmooth: 3, imgPrune: 12, imgBlur: true, optOrder: true, optJoin: 1, optSeg: 3, optTurn: 8, optSimp: 0.2, optMin: 10, optMinDetail: 2, optSimpDetail: 0.1 }
       }, after: () => { for (const o of S.objects) if (o.kind === 'image') retrace(o); refresh(); } }
   };
+  // Drawing presets = the Sketchy Lab plotter preset test (#6 "Speed Ceiling" left out: it shook too much).
+  // Each is the default conversion with the preset's own trace changes, plus its speeds.
+  const DRAW_SPEED = ['spDraw', 'zoneSpeed', 'spTravel', 'spZ', 'acc', 'accT', 'jerk', 'zLift'];
+  const LAB_PRESETS = [
+    ['#1 Steady Hand', 'Slowest and most exact. Keeps the most small detail.', { spDraw: 2500, zoneSpeed: 50, spTravel: 7000, spZ: 1500, acc: 300, accT: 1000, jerk: 4, zLift: 5 }, { imgRes: 3100, imgSpeck: 9, imgPrune: 3, fillX: 1.5, optMin: 1, optMinDetail: 0.8 }],
+    ['#2 Studio Standard', 'The Plotter Studio default, as a baseline to beat.', { spDraw: 3500, zoneSpeed: 60, spTravel: 7000, spZ: 2000, acc: 400, accT: 1000, jerk: 5, zLift: 5 }, {}],
+    ['#3 Balanced', 'A little faster everywhere, with the face at about the same pace as Standard.', { spDraw: 4500, zoneSpeed: 50, spTravel: 9000, spZ: 2500, acc: 500, accT: 1200, jerk: 5, zLift: 4 }, {}],
+    ['#4 Event Pace', 'Quick body, careful face.', { spDraw: 6000, zoneSpeed: 35, spTravel: 9000, spZ: 3000, acc: 700, accT: 1500, jerk: 6, zLift: 3 }, {}],
+    ['#5 Quick Body, Slow Face', 'Pushes the body harder and skips the tiniest stray lines outside the face.', { spDraw: 8000, zoneSpeed: 25, spTravel: 12000, spZ: 3500, acc: 900, accT: 2000, jerk: 6, zLift: 3 }, { optMin: 2.5 }],
+    ['#7 Soft Curves', 'Gentle starts and turns with extra smoothing, for flowing lines.', { spDraw: 3500, zoneSpeed: 55, spTravel: 7000, spZ: 2000, acc: 300, accT: 1000, jerk: 3, zLift: 4 }, { imgSmooth: 7, optJoin: 0.8 }],
+    ['#8 Crisp Corners', 'Moderate speed with snappy turns and less smoothing, for sharp features.', { spDraw: 3000, zoneSpeed: 60, spTravel: 8000, spZ: 2500, acc: 1200, accT: 2000, jerk: 10, zLift: 4 }, { imgSmooth: 3, imgPrune: 3 }],
+    ['#9 Clean & Simple', 'Removes specks and short stray lines for fewer pen lifts and a tidier look.', { spDraw: 5000, zoneSpeed: 45, spTravel: 10000, spZ: 3000, acc: 600, accT: 1500, jerk: 5, zLift: 3 }, { imgSpeck: 20, imgSmooth: 6, imgPrune: 6, optJoin: 1, optMin: 4, optMinDetail: 1.5 }],
+    ['#10 Outlines Only', 'Never colors in thick areas. Draws them as a single line instead.', { spDraw: 4000, zoneSpeed: 50, spTravel: 8000, spZ: 2500, acc: 500, accT: 1200, jerk: 5, zLift: 4 }, { fillX: 0, imgDots: false }]];
+  const BASE_CONV = Object.assign({}, GROUPS.conv.builtin['AI line art — full figure (default)']); delete BASE_CONV.zoneSpeed;
+  const DRAW_BLURB = {};
+  GROUPS.draw = { fields: GROUPS.conv.fields.concat(DRAW_SPEED), builtin: {}, label: 'drawing',
+    after: () => { GROUPS.speed.after(); GROUPS.conv.after(); } };
+  for (const [name, blurb, speed, conv] of LAB_PRESETS) { GROUPS.draw.builtin[name] = Object.assign({}, BASE_CONV, conv, speed); DRAW_BLURB[name] = blurb; }
+  const groupLabel = g => GROUPS[g].label || (g === 'speed' ? 'speed' : 'conversion');
   const PKEY = 'dexdraw.presets.v3';
   function loadPresets() { try { return JSON.parse(localStorage.getItem(PKEY) || '{}'); } catch (_) { return {}; } }
   function savePresets(p) { try { localStorage.setItem(PKEY, JSON.stringify(p)); } catch (_) { } }
@@ -1504,28 +1531,32 @@ window.DEXARM_PEN_OFFSET=114;
     const box = document.querySelector(`.preset[data-group="${g}"]`), sel = box.querySelector('.pSel'), store = loadPresets()[g] || { saved: {}, def: null };
     sel.innerHTML = '';
     const add = (name, kind) => { const op = document.createElement('option'); op.value = kind + ':' + name; op.textContent = (store.def === op.value ? '★ ' : '') + name; sel.appendChild(op); };
+    if (g === 'draw') { const op = document.createElement('option'); op.value = ''; op.textContent = store.def ? '— choose a drawing preset —' : '— choose a drawing preset (no default yet) —'; sel.appendChild(op); }
     for (const n in GROUPS[g].builtin) add(n, 'builtin'); for (const n in store.saved) add(n, 'saved');
     if (store.def && [...sel.options].some(o => o.value === store.def)) sel.value = store.def; else sel.selectedIndex = 0;
     box.querySelector('.pDel').disabled = !sel.value.startsWith('saved:'); box.querySelector('.pUpd').disabled = !sel.value.startsWith('saved:');
   }
+  function showDrawBlurb() { const sel = document.querySelector('.preset[data-group="draw"] .pSel'); if (!sel) return; const key = sel.value || ''; const name = key.slice(key.indexOf(':') + 1);
+    $('drawBlurb').textContent = key.startsWith('builtin:') ? DRAW_BLURB[name] || '' : key.startsWith('saved:') ? 'One of your saved drawing presets.' : ''; }
   function presetVals(g, key) { const [kind, name] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)]; return kind === 'saved' ? (loadPresets()[g] || { saved: {} }).saved[name] : GROUPS[g].builtin[name]; }
   for (const g in GROUPS) {
     const box = document.querySelector(`.preset[data-group="${g}"]`), sel = box.querySelector('.pSel');
     fillPresetUI(g);
-    sel.addEventListener('change', () => { const v = presetVals(g, sel.value); if (v) applyGroup(g, v); box.querySelector('.pDel').disabled = !sel.value.startsWith('saved:'); box.querySelector('.pUpd').disabled = !sel.value.startsWith('saved:'); log(`${g === 'speed' ? 'speed' : 'conversion'} preset applied: ${sel.options[sel.selectedIndex].textContent}`); });
+    sel.addEventListener('change', () => { const v = presetVals(g, sel.value); if (v) applyGroup(g, v); box.querySelector('.pDel').disabled = !sel.value.startsWith('saved:'); box.querySelector('.pUpd').disabled = !sel.value.startsWith('saved:'); log(`${groupLabel(g)} preset applied: ${sel.options[sel.selectedIndex].textContent}`); if (g === 'draw') showDrawBlurb(); });
     box.querySelector('.pSave').addEventListener('click', () => {
-      const name = (prompt('Name for this ' + (g === 'speed' ? 'speed' : 'conversion') + ' preset:') || '').trim(); if (!name) return;
-      const all = loadPresets(); all[g] = all[g] || { saved: {}, def: null }; all[g].saved[name] = readGroup(g); savePresets(all); fillPresetUI(g); sel.value = 'saved:' + name; box.querySelector('.pDel').disabled = false; box.querySelector('.pUpd').disabled = false; log(`saved preset "${name}"`);
+      const name = (prompt('Name for this ' + groupLabel(g) + ' preset:') || '').trim(); if (!name) return;
+      const all = loadPresets(); all[g] = all[g] || { saved: {}, def: null }; all[g].saved[name] = readGroup(g); savePresets(all); fillPresetUI(g); sel.value = 'saved:' + name; box.querySelector('.pDel').disabled = false; box.querySelector('.pUpd').disabled = false; log(`saved preset "${name}"`); if (g === 'draw') showDrawBlurb();
     });
     box.querySelector('.pUpd').addEventListener('click', () => {
       if (!sel.value.startsWith('saved:')) { log('pick one of your saved presets first (built-ins can\'t be changed — use Save as…)', 'err'); return; }
       const name = sel.value.slice(6); const all = loadPresets(); all[g].saved[name] = readGroup(g); savePresets(all); log(`preset "${name}" updated with the current values`);
     });
-    box.querySelector('.pDef').addEventListener('click', () => { const all = loadPresets(); all[g] = all[g] || { saved: {}, def: null }; all[g].def = sel.value; savePresets(all); fillPresetUI(g); log(`"${sel.options[sel.selectedIndex].textContent.replace('★ ', '')}" is now the default ${g === 'speed' ? 'speed' : 'conversion'} preset`); });
-    box.querySelector('.pDel').addEventListener('click', () => { if (!sel.value.startsWith('saved:')) return; const name = sel.value.slice(6); const all = loadPresets(); delete all[g].saved[name]; if (all[g].def === sel.value) all[g].def = null; savePresets(all); fillPresetUI(g); log(`deleted preset "${name}"`); });
+    box.querySelector('.pDef').addEventListener('click', () => { const all = loadPresets(); all[g] = all[g] || { saved: {}, def: null }; if (!sel.value) { all[g].def = null; savePresets(all); fillPresetUI(g); log(`no default ${groupLabel(g)} preset any more — Studio keeps whatever was on screen last time`); return; } all[g].def = sel.value; savePresets(all); fillPresetUI(g); log(`"${sel.options[sel.selectedIndex].textContent.replace('★ ', '')}" is now the default ${groupLabel(g)} preset`); if (g === 'draw') showDrawBlurb(); });
+    box.querySelector('.pDel').addEventListener('click', () => { if (!sel.value.startsWith('saved:')) return; const name = sel.value.slice(6); const all = loadPresets(); delete all[g].saved[name]; if (all[g].def === sel.value) all[g].def = null; savePresets(all); fillPresetUI(g); log(`deleted preset "${name}"`); if (g === 'draw') showDrawBlurb(); });
     // apply the default on load (only if no settings were ever saved by the user, or a default is explicitly set)
     const store = loadPresets()[g]; const def = store && store.def; if (def) { const v = presetVals(g, def); if (v) { for (const id of GROUPS[g].fields) if (id in v) { const e = $(id); if (e.type === 'checkbox') e.checked = !!v[id]; else e.value = v[id]; } } }
   }
+  showDrawBlurb();
   for (const id of ['spDraw', 'spTravel', 'spZ', 'acc', 'accT', 'jerk', 'fastTravel', 'zLift', 'zSafe']) $(id).addEventListener('change', () => { S.gcode = ''; updateButtons(); draw(); });
 
   // ---------- gcode ----------
