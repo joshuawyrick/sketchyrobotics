@@ -24,6 +24,10 @@
   section>h2::before{content:"▾";margin-right:6px;font-size:11px}
   section.closed>h2::before{content:"▸"}
   section.closed>.body{display:none}
+  body.simple .adv{display:none!important}
+  .dlist{display:flex;flex-direction:column;gap:6px}.dcard{display:flex;gap:8px;align-items:flex-start;border:1px solid var(--line);border-radius:8px;background:#fff;padding:8px 10px;cursor:pointer;text-align:left}.dcard:hover{border-color:#9db8e0}.dcard.on{border:2px solid var(--blue,#006df6);background:#eef5ff;padding:7px 9px}
+  .dcard .dt{flex:1;min-width:0}.dcard b{display:block;font-size:13px}.dcard small{display:block;color:var(--mut);font-size:11.5px;line-height:1.35;margin-top:2px}.dcard .dstar,.dcard .dx{border:0;background:none;padding:0 2px;font-size:17px;line-height:1;cursor:pointer;color:#b8c2d0}.dcard .dstar.on{color:#e0a800}.dcard .dx{font-size:13px}.dcard .dx:hover{color:#c0392b}.dcard .ddef{font-size:10.5px;font-weight:700;color:#a07800;white-space:nowrap}
+  .advToggle{width:100%;margin-bottom:10px;padding:9px 10px;border:1px dashed #b9c4d4;border-radius:8px;background:var(--panel2);color:var(--mut);font-weight:600;cursor:pointer;text-align:left}
   .body{padding:4px 10px 10px}
   .row{display:flex;align-items:center;gap:8px;margin:6px 0}
   .row label{flex:1;color:var(--mut);font-size:12.5px}
@@ -110,9 +114,11 @@
     <section>
       <h2>Drawing preset <span class="note" style="margin-left:auto">speed + trace settings in one pick</span></h2>
       <div class="body">
-        <div class="preset" data-group="draw"><select class="pSel"></select><button class="pSave" title="Save every speed + trace setting on screen under a new name">Save as…</button><button class="pUpd" title="Overwrite the selected saved preset with the values on screen">Update</button><button class="pDef" title="Load this preset automatically every time Studio opens on this computer">★ Default</button><button class="pDel" title="Delete this saved preset">Delete</button></div>
-        <div class="note" id="drawBlurb" style="margin-top:6px"></div>
-        <div class="note">Numbers match the Sketchy Lab preset test. ★ marks the default, which loads every time Studio opens on this computer. The Conversion and Speed menus below still fine-tune either half.</div>
+        <div id="drawList" class="dlist"></div>
+        <div class="row" style="margin-top:8px"><button class="sm" id="drawSaveAs" title="Keep every speed + trace setting on screen as your own preset">Save current settings as a preset…</button></div>
+        <div class="preset" data-group="draw" style="display:none"><select class="pSel"></select><button class="pSave" title="Save every speed + trace setting on screen under a new name">Save as…</button><button class="pUpd" title="Overwrite the selected saved preset with the values on screen">Update</button><button class="pDef" title="Load this preset automatically every time Studio opens on this computer">★ Default</button><button class="pDel" title="Delete this saved preset">Delete</button></div>
+        <div class="note" id="drawBlurb" style="display:none"></div>
+        <div class="note">Click a preset to use it. Click its ☆ to make it the default, which loads every time Studio opens on this computer. Numbers match the Sketchy Lab preset test.</div>
       </div>
     </section>
     <section>
@@ -120,9 +126,9 @@
       <div class="body">
         <div id="drop"><b>Drop a PNG / JPG / SVG here</b><br>or click to choose a file<input id="file" type="file" accept=".svg,.png,.jpg,.jpeg,.gif,.bmp,.webp,image/*" style="display:none"></div>
         <div class="note" id="fileInfo">No file loaded.</div>
-        <div class="row" style="margin-top:8px"><label>Conversion preset <span class="note">(trace + path rules)</span></label></div>
-        <div class="preset" data-group="conv"><select class="pSel"></select><button class="pSave" title="Save the current trace + path settings under a new name">Save as…</button><button class="pUpd" title="Overwrite the selected saved preset with the values on screen">Update</button><button class="pDef" title="Load this preset automatically when the page opens">★ Default</button><button class="pDel" title="Delete this saved preset">Delete</button></div>
-        <div id="imgOpts" style="display:none">
+        <div class="row adv" style="margin-top:8px"><label>Conversion preset <span class="note">(trace + path rules)</span></label></div>
+        <div class="preset adv" data-group="conv"><select class="pSel"></select><button class="pSave" title="Save the current trace + path settings under a new name">Save as…</button><button class="pUpd" title="Overwrite the selected saved preset with the values on screen">Update</button><button class="pDef" title="Load this preset automatically when the page opens">★ Default</button><button class="pDel" title="Delete this saved preset">Delete</button></div>
+        <div id="imgOpts" class="adv" style="display:none">
           <div class="row"><label>Trace mode</label><select id="imgMode"><option value="ink">Line art</option><option value="edge">Edges (photos)</option></select></div>
           <div class="row"><label>Threshold <span id="thrV">187</span></label><input id="imgThr" type="range" min="1" max="254" value="187"></div>
           <div class="row"><label>Invert (white on black)</label><input id="imgInv" type="checkbox"></div>
@@ -166,7 +172,8 @@
         <div class="note">On the preview: click to select · drag to move · drag a corner to resize · right-click or Delete key to remove. Drop more files to add more drawings.</div>
       </div>
     </section>
-    <section>
+    <button type="button" id="advToggle" class="advToggle">▸ Advanced settings — trace, path &amp; speed</button>
+    <section class="adv">
       <h2>4 · Path optimization</h2>
       <div class="body">
         <div class="row"><label>Reorder for shortest travel</label><input id="optOrder" type="checkbox" checked></div>
@@ -187,7 +194,7 @@
       </div>
       </div>
     </section>
-    <section>
+    <section class="adv">
       <h2>5 · Speed <span class="note" style="margin-left:auto">no caps</span></h2>
       <div class="body">
         <div class="preset" data-group="speed"><select class="pSel"></select><button class="pSave" title="Save the current values under a new name">Save as…</button><button class="pUpd" title="Overwrite the selected saved preset with the values on screen">Update</button><button class="pDef" title="Load this preset automatically when the page opens">★ Default</button><button class="pDel" title="Delete this saved preset">Delete</button></div>
@@ -1536,16 +1543,27 @@ window.DEXARM_PEN_OFFSET=114;
     if (store.def && [...sel.options].some(o => o.value === store.def)) sel.value = store.def; else sel.selectedIndex = 0;
     box.querySelector('.pDel').disabled = !sel.value.startsWith('saved:'); box.querySelector('.pUpd').disabled = !sel.value.startsWith('saved:');
   }
-  function showDrawBlurb() { const sel = document.querySelector('.preset[data-group="draw"] .pSel'); if (!sel) return; const key = sel.value || ''; const name = key.slice(key.indexOf(':') + 1);
+  const DPICK = 'dexdraw.drawPicked';
+  function drawSel() { return document.querySelector('.preset[data-group="draw"] .pSel'); }
+  function renderDrawList() { const sel = drawSel(), list = $('drawList'); if (!sel || !list) return; const def = (loadPresets().draw || {}).def || ''; let picked = ''; try { picked = localStorage.getItem(DPICK) || ''; } catch (_) {}
+    list.innerHTML = [...sel.options].filter(o => o.value).map(o => { const key = o.value, name = key.slice(key.indexOf(':') + 1), saved = key.startsWith('saved:');
+      return `<div class="dcard${key === picked ? ' on' : ''}" data-key="${escHtml(key)}" title="Use ${escHtml(name)}"><div class="dt"><b>${escHtml(name)}</b><small>${escHtml(saved ? 'Your saved preset.' : DRAW_BLURB[name] || '')}</small></div>${key === def ? '<span class="ddef">default</span>' : ''}<button class="dstar${key === def ? ' on' : ''}" title="${key === def ? 'Default — click to stop loading it automatically' : 'Make this the default'}">${key === def ? '★' : '☆'}</button>${saved ? '<button class="dx" title="Delete this saved preset">✕</button>' : ''}</div>`; }).join('');
+    list.querySelectorAll('.dcard').forEach(c => { const key = c.dataset.key; const box = document.querySelector('.preset[data-group="draw"]');
+      c.onclick = () => { sel.value = key; sel.dispatchEvent(new Event('change')); };
+      c.querySelector('.dstar').onclick = e => { e.stopPropagation(); const isDef = ((loadPresets().draw || {}).def || '') === key; const keep = sel.value; sel.value = isDef ? '' : key; box.querySelector('.pDef').click(); sel.value = keep; renderDrawList(); };
+      const x = c.querySelector('.dx'); if (x) x.onclick = e => { e.stopPropagation(); if (!confirm(`Delete your preset "${key.slice(6)}"?`)) return; sel.value = key; const del = box.querySelector('.pDel'); del.disabled = false; del.click(); try { if (localStorage.getItem(DPICK) === key) localStorage.removeItem(DPICK); } catch (_) {} renderDrawList(); }; }); }
+  function escHtml(t) { return String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+  const markPicked = key => { try { if (key) localStorage.setItem(DPICK, key); } catch (_) {} };
+  function showDrawBlurb() { renderDrawList(); const sel = document.querySelector('.preset[data-group="draw"] .pSel'); if (!sel) return; const key = sel.value || ''; const name = key.slice(key.indexOf(':') + 1);
     $('drawBlurb').textContent = key.startsWith('builtin:') ? DRAW_BLURB[name] || '' : key.startsWith('saved:') ? 'One of your saved drawing presets.' : ''; }
   function presetVals(g, key) { const [kind, name] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)]; return kind === 'saved' ? (loadPresets()[g] || { saved: {} }).saved[name] : GROUPS[g].builtin[name]; }
   for (const g in GROUPS) {
     const box = document.querySelector(`.preset[data-group="${g}"]`), sel = box.querySelector('.pSel');
     fillPresetUI(g);
-    sel.addEventListener('change', () => { const v = presetVals(g, sel.value); if (v) applyGroup(g, v); box.querySelector('.pDel').disabled = !sel.value.startsWith('saved:'); box.querySelector('.pUpd').disabled = !sel.value.startsWith('saved:'); log(`${groupLabel(g)} preset applied: ${sel.options[sel.selectedIndex].textContent}`); if (g === 'draw') showDrawBlurb(); });
+    sel.addEventListener('change', () => { const v = presetVals(g, sel.value); if (v) applyGroup(g, v); box.querySelector('.pDel').disabled = !sel.value.startsWith('saved:'); box.querySelector('.pUpd').disabled = !sel.value.startsWith('saved:'); log(`${groupLabel(g)} preset applied: ${sel.options[sel.selectedIndex].textContent}`); if (g === 'draw') { markPicked(sel.value); showDrawBlurb(); } });
     box.querySelector('.pSave').addEventListener('click', () => {
       const name = (prompt('Name for this ' + groupLabel(g) + ' preset:') || '').trim(); if (!name) return;
-      const all = loadPresets(); all[g] = all[g] || { saved: {}, def: null }; all[g].saved[name] = readGroup(g); savePresets(all); fillPresetUI(g); sel.value = 'saved:' + name; box.querySelector('.pDel').disabled = false; box.querySelector('.pUpd').disabled = false; log(`saved preset "${name}"`); if (g === 'draw') showDrawBlurb();
+      const all = loadPresets(); all[g] = all[g] || { saved: {}, def: null }; all[g].saved[name] = readGroup(g); savePresets(all); fillPresetUI(g); sel.value = 'saved:' + name; box.querySelector('.pDel').disabled = false; box.querySelector('.pUpd').disabled = false; log(`saved preset "${name}"`); if (g === 'draw') { markPicked(sel.value); showDrawBlurb(); }
     });
     box.querySelector('.pUpd').addEventListener('click', () => {
       if (!sel.value.startsWith('saved:')) { log('pick one of your saved presets first (built-ins can\'t be changed — use Save as…)', 'err'); return; }
@@ -1556,7 +1574,11 @@ window.DEXARM_PEN_OFFSET=114;
     // apply the default on load (only if no settings were ever saved by the user, or a default is explicitly set)
     const store = loadPresets()[g]; const def = store && store.def; if (def) { const v = presetVals(g, def); if (v) { for (const id of GROUPS[g].fields) if (id in v) { const e = $(id); if (e.type === 'checkbox') e.checked = !!v[id]; else e.value = v[id]; } } }
   }
-  showDrawBlurb();
+  { const d0 = (loadPresets().draw || {}).def; if (d0) markPicked(d0); } showDrawBlurb(); // the default was just loaded, so it's the one in use
+  $('drawSaveAs').onclick = () => document.querySelector('.preset[data-group="draw"] .pSave').click();
+  // Advanced settings (trace, path, speed) are tucked away unless opened; remembered per computer
+  const ADV = 'dexdraw.advanced'; function setAdv(on) { document.body.classList.toggle('simple', !on); $('advToggle').textContent = on ? '▾ Hide advanced settings' : '▸ Advanced settings — trace, path & speed'; try { localStorage.setItem(ADV, on ? '1' : ''); } catch (_) {} }
+  let advOn = false; try { advOn = localStorage.getItem(ADV) === '1'; } catch (_) {} setAdv(advOn); $('advToggle').onclick = () => setAdv(document.body.classList.contains('simple'));
   for (const id of ['spDraw', 'spTravel', 'spZ', 'acc', 'accT', 'jerk', 'fastTravel', 'zLift', 'zSafe']) $(id).addEventListener('change', () => { S.gcode = ''; updateButtons(); draw(); });
 
   // ---------- gcode ----------
