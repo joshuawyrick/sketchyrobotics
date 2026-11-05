@@ -228,7 +228,7 @@ const PHONE_TTL = 10 * 60000;
 setInterval(() => { for (const [c, v] of phoneCodes) if (Date.now() - v.createdAt > PHONE_TTL) phoneCodes.delete(c); }, 60000);
 app.post('/api/phone/code', (req, res) => {
   const theme = readTheme(slugify(req.body.theme || '')); const variant = String(req.body.variant || '');
-  if (!theme || !VARIANTS.includes(variant)) return res.status(400).json({ error: 'pick a style first' });
+  if (!theme || !shownToGuests(theme, getSettings()) || !VARIANTS.includes(variant)) return res.status(400).json({ error: 'pick a style first' });
   let code; do { code = Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[crypto.randomInt(32)]).join(''); } while (phoneCodes.has(code));
   phoneCodes.set(code, { theme: theme.slug, themeName: theme.name, variant, createdAt: Date.now(), photo: null });
   const base = (req.get('x-forwarded-proto') || req.protocol) + '://' + req.get('host');
@@ -257,7 +257,9 @@ app.post('/api/phone/:code/photo', upload.single('photo'), async (req, res) => {
 app.get('/api/phone/:code/photo', (req, res) => { const v = phoneCodes.get(req.params.code); if (!v || !v.photo) return res.status(404).end(); res.setHeader('content-type', 'image/jpeg'); res.setHeader('cache-control', 'no-store'); res.send(v.photo); });
 
 // ----- public (guest) -----
-app.get('/api/themes', (req, res) => res.json({ themes: listThemes().filter(t => t.enabled && t.rating === (getSettings().eventMode === 'adult' ? 'adult' : 'family')).map(t => ({ slug: t.slug, name: t.name, hasThumb: t.hasThumb, variants: VARIANTS.filter(v => t.prompts[v].trim()) })), variants: VARIANT_LABELS, event: getSettings().eventName, cameraZoom: getSettings().cameraZoom, build: BUILD, pay: payOn() ? { sizes: paySizes().map(z => ({ id: z.id, label: z.label, price: z.price, text: money(z.price) })) } : null, bots: botCount() }));
+/** which themes guests can pick: 18+ events show every theme (family and adult), family events only family themes */
+const shownToGuests = (t, s) => t.enabled && (s.eventMode === 'adult' || t.rating !== 'adult');
+app.get('/api/themes', (req, res) => res.json({ themes: listThemes().filter(t => shownToGuests(t, getSettings())).map(t => ({ slug: t.slug, name: t.name, hasThumb: t.hasThumb, variants: VARIANTS.filter(v => t.prompts[v].trim()) })), variants: VARIANT_LABELS, event: getSettings().eventName, cameraZoom: getSettings().cameraZoom, build: BUILD, pay: payOn() ? { sizes: paySizes().map(z => ({ id: z.id, label: z.label, price: z.price, text: money(z.price) })) } : null, bots: botCount() }));
 app.get('/api/themes/:slug/thumb', (req, res) => { const f = path.join(THEMES, slugify(req.params.slug), 'thumb.png'); if (fs.existsSync(f)) res.sendFile(f); else res.status(404).end(); });
 // ---------- remote submissions: one standing link/QR per event; guests pick a theme and send a photo from anywhere ----------
 const newCode = () => crypto.randomBytes(4).toString('hex').slice(0, 6);
@@ -267,7 +269,7 @@ function remoteAllowed(ip) { const now = Date.now(); const a = (remoteHits.get(i
 app.get('/go/:code', (req, res) => res.sendFile(path.join(ROOT, 'public', 'remote', 'index.html')));
 app.get('/api/remote/:code', (req, res) => { if (!remoteOn(req.params.code)) return res.status(404).json({ ok: false }); const s = getSettings();
   res.json({ ok: true, event: s.eventName, variants: VARIANT_LABELS, variantOrder: VARIANTS, pay: payOn() ? { sizes: paySizes().map(z => ({ id: z.id, label: z.label, price: z.price, text: money(z.price) })) } : null,
-    themes: listThemes().filter(t => t.enabled && (t.rating === 'adult' ? s.eventMode === 'adult' : s.eventMode !== 'adult')).map(t => ({ slug: t.slug, name: t.name, hasThumb: t.hasThumb, variants: VARIANTS.filter(v => t.prompts[v].trim()) })) }); });
+    themes: listThemes().filter(t => shownToGuests(t, s)).map(t => ({ slug: t.slug, name: t.name, hasThumb: t.hasThumb, variants: VARIANTS.filter(v => t.prompts[v].trim()) })) }); });
 app.get('/api/remote/:code/thumb/:slug', async (req, res) => { if (!remoteOn(req.params.code)) return res.status(404).end(); const f = path.join(THEMES, slugify(req.params.slug), 'thumb.png'); if (await ensureLocal(f)) res.sendFile(f); else res.status(404).end(); });
 app.post('/api/remote/:code/jobs', upload.single('photo'), (req, res, next) => { if (!remoteOn(req.params.code)) return res.status(404).json({ error: 'This link is not active right now.' }); const ip = req.get('x-forwarded-for') || req.ip; if (!remoteAllowed(String(ip).split(',')[0].trim())) return res.status(429).json({ error: 'That is a lot of sketches from one phone — please try again in a little while.' }); req.body.pad = 'Remote'; req.body.bot = ''; req.body.name1 = req.body.name2 = req.body.petName = ''; req.remote = req.params.code; next(); }, createJob);
 app.get('/api/admin/remote/qr.svg', adminAuth, async (req, res) => { const r = getSettings().remote || {}; if (!r.code) return res.status(404).end(); const base = (req.get('x-forwarded-proto') || req.protocol) + '://' + req.get('host'); try { const svg = await require('qrcode').toString(`${base}/go/${r.code}`, { type: 'svg', margin: 2, errorCorrectionLevel: 'M' }); res.setHeader('content-type', 'image/svg+xml'); res.setHeader('cache-control', 'no-store'); res.send(svg); } catch (e) { res.status(500).end(); } });
@@ -276,7 +278,7 @@ app.post('/api/admin/remote/code', adminAuth, (req, res) => { const s = getSetti
 app.post('/api/jobs', upload.single('photo'), createJob);
 async function createJob(req, res) {
   try {
-    const theme = readTheme(slugify(req.body.theme || '')); if (!theme || !theme.enabled) return res.status(400).json({ error: 'unknown theme' });
+    const theme = readTheme(slugify(req.body.theme || '')); if (!theme || !shownToGuests(theme, getSettings())) return res.status(400).json({ error: 'unknown theme' }); // guests only get what the event shows
     const variant = String(req.body.variant || ''); if (!VARIANTS.includes(variant)) return res.status(400).json({ error: 'unknown variant' });
     if (!theme.prompts[variant].trim()) return res.status(400).json({ error: 'That option is not set up yet for this theme' });
     if (!req.file) return res.status(400).json({ error: 'no photo' });
