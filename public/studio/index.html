@@ -226,7 +226,7 @@
     <canvas id="cv"></canvas>
     <div id="stats">no artwork</div>
     <div id="ctx"><button data-a="fit">Fit to page</button><button data-a="center">Center on page</button><button data-a="dup">Duplicate</button><button data-a="del">Delete</button></div>
-    <div id="hint">black = exactly what the pen draws (real width) · orange = traced but left out · red dashes = travel · blue ring = arm reach · grey = paper, dashed = edge buffer · scroll to zoom, drag empty space to pan, double-click to re-center</div>
+    <div id="hint">black = exactly what the pen draws (real width) · orange = traced but left out · purple dashes = drawing size · red dashes = travel · blue ring = arm reach · grey = paper, dashed = edge buffer · scroll to zoom, drag empty space to pan, double-click to re-center</div>
   </div>
 
   <!-- RIGHT: machine -->
@@ -244,8 +244,10 @@
         <div class="btns" style="margin-top:8px"><span class="note" style="align-self:center">Hands-free:</span><button id="btnQAuto">▶ Auto-run queue</button></div>
         <div class="row"><label>Auto-run: pause after each drawing (to change paper)</label><input id="qPause" type="checkbox" checked></div><div class="row" id="qUnmannedRow" style="display:none"><span class="note">Unmanned event (Admin → Settings): after each drawing the arm waits until a guest taps "paper is in" on the iPad, then draws the next one by itself. Pause-between is ignored.</span></div>
         <div class="row"><label>Auto-run: preview countdown before drawing</label><input id="qPreview" type="checkbox" checked><input id="qPreviewSecs" type="number" value="6" min="0" step="1" style="width:56px"><span class="unit">s</span></div>
-        <div class="row"><label>Drawing size for this event</label><select id="qSize"><option value="fit">Fit to page</option><option value="4">4 in wide</option><option value="5">5 in wide</option><option value="6" selected>6 in wide</option><option value="7">7 in wide</option><option value="8">8 in wide</option><option value="custom">Custom…</option></select></div>
-        <div class="row" id="qSizeCustomRow" style="display:none"><label>Custom width</label><input id="qSizeCustom" type="number" value="5.5" step="0.25" min="1"><span class="unit">in</span></div>
+        <div class="row"><label>Drawing size</label><select id="qSize"><option value="fit">Fit to paper</option><option value="4x6">4 × 6 in</option><option value="5x7">5 × 7 in</option><option value="6x8">6 × 8 in</option><option value="8x10">8 × 10 in</option><option value="custom">Custom…</option></select></div>
+        <div class="row" id="qSizeCustomRow" style="display:none"><label>Custom size</label><input id="qBoxW" type="number" value="5" step="0.25" min="1" style="width:60px"><span class="unit">×</span><input id="qBoxH" type="number" value="7" step="0.25" min="1" style="width:60px"><span class="unit">in</span></div>
+        <div class="row"><label>A guest who paid for a size gets that size</label><input id="qPaidSize" type="checkbox" checked></div>
+        <div class="note" style="margin-bottom:4px">Every drawing — and the guest's name — fits inside this frame on whatever paper is loaded, keeping its proportions. The purple dashed frame on the preview shows it to scale.</div>
         <div class="row"><label>Place on page</label><select id="qPlace"><option value="center" selected>Centered</option><option value="top">Top (leave room below)</option><option value="bottom">Bottom (leave room above)</option></select></div>
         <div class="row" style="display:none"><label>Draw guests' names</label><input id="qNames" type="checkbox"><select id="qNamePos" style="width:auto"><option value="above" selected>above the drawing</option><option value="below">below the drawing</option></select></div>
         <div class="row" style="display:none"><label>Name lettering</label><select id="qNameFont" style="width:auto"><option value="Clean" selected>Clean</option><option value="Script">Script</option><option value="Serif">Serif</option></select><input id="qNameH" type="number" value="12" min="5" max="40" step="1" style="width:64px"><span class="unit">mm tall</span></div>
@@ -1246,7 +1248,7 @@ window.DEXARM_PEN_OFFSET=114;
 
   // ---------- persistence ----------
   const PERSIST = ['imgMode', 'imgThr', 'imgInv', 'imgRes', 'imgSpeck', 'imgPrune', 'imgSmooth', 'imgBlur', 'paper', 'orient', 'margin', 'paperX', 'paperY',
-    'optOrder', 'optJoin', 'optSeg', 'optTurn', 'optSimp', 'optMin', 'optMinDetail', 'optSimpDetail', 'zoneSpeed', 'imgDots', 'penW', 'fillX', 'spDraw', 'spTravel', 'spZ', 'acc', 'accT', 'jerk', 'fastTravel', 'inflight', 'zDown', 'zLift', 'zSafe', 'jogStep', 'jogSpeed', 'qPause', 'qPreview', 'qPreviewSecs', 'qSize', 'qSizeCustom', 'qPlace', 'qNames', 'qNamePos', 'qNameFont', 'qNameH', 'zoneAuto', 'zoneDepth', 'showDropped', 'showSrc'];
+    'optOrder', 'optJoin', 'optSeg', 'optTurn', 'optSimp', 'optMin', 'optMinDetail', 'optSimpDetail', 'zoneSpeed', 'imgDots', 'penW', 'fillX', 'spDraw', 'spTravel', 'spZ', 'acc', 'accT', 'jerk', 'fastTravel', 'inflight', 'zDown', 'zLift', 'zSafe', 'jogStep', 'jogSpeed', 'qPause', 'qPreview', 'qPreviewSecs', 'qSize', 'qBoxW', 'qBoxH', 'qPaidSize', 'qPlace', 'qNames', 'qNamePos', 'qNameFont', 'qNameH', 'zoneAuto', 'zoneDepth', 'showDropped', 'showSrc'];
   // ---- which robot is this tab? (one Studio tab per arm; /studio/?bot=3 or the header dropdown) ----
   const BOT = Math.max(1, Math.min(8, +(new URLSearchParams(location.search).get('bot') || sessionStorage.getItem('dexdraw.bot') || 1)));
   try { sessionStorage.setItem('dexdraw.bot', BOT); } catch (_) { }
@@ -1283,7 +1285,7 @@ window.DEXARM_PEN_OFFSET=114;
     const cx = num('paperX'), cy = num('paperY');
     return { w, h, cx, cy, m, safe: { minX: cx - w / 2 + m, maxX: cx + w / 2 - m, minY: cy - h / 2 + m, maxY: cy + h / 2 - m, w: w - 2 * m, h: h - 2 * m } };
   }
-  for (const id of ['paper', 'orient', 'margin', 'paperX', 'paperY']) $(id).addEventListener('change', () => { for (const o of S.objects) constrain(o); refresh(); });
+  for (const id of ['paper', 'orient', 'margin', 'paperX', 'paperY']) $(id).addEventListener('change', () => { if (S.frame) { resizeToEvent(); return; } for (const o of S.objects) constrain(o); refresh(); });
   $('btnPaperHere').addEventListener('click', guard(async () => { await link.send('M400'); await link.query('M114', /^X:/); $('paperX').value = S.pos.x.toFixed(1); $('paperY').value = S.pos.y.toFixed(1); saveSettings(); for (const o of S.objects) constrain(o); refresh(); log(`paper center set to X${S.pos.x.toFixed(1)} Y${S.pos.y.toFixed(1)}`); }));
   $('btnTracePaper').addEventListener('click', guard(async () => {
     const P = paper().safe, o = gcodeOpts(), f = num('spTravel');
@@ -1323,6 +1325,7 @@ window.DEXARM_PEN_OFFSET=114;
     obj.id = nextId++; obj.rot = 0; obj.mirror = false; obj.x = 0; obj.y = 0; obj.w = 10; obj.h = 10; obj.placed = [];
     fitToPage(obj);
     S.objects.push(obj); select(obj);
+    if (!f.fromQueue && S.objects.filter(x => x.kind !== 'text').length === 1 && eventBox()) applyEventSize(); else if (!S.objects.some(x => x.kind !== 'text' && x !== obj)) S.frame = null; // the drawing size applies to hand-loaded pictures too
     if (obj.kind === 'image') { S.zoneEdit = false; syncZoneButtons(); retrace(obj); } else refresh();
   }
 
@@ -1746,7 +1749,7 @@ window.DEXARM_PEN_OFFSET=114;
     if (drag.kind === 'zmove') { S.zone.x = w.x + drag.dx; S.zone.y = w.y + drag.dy; S.planDirty = true; draw(); return; }
     if (drag.kind === 'zresize') { const nw = Math.max(5, Math.abs(w.x - drag.anchor.x)), nh = Math.max(5, Math.abs(w.y - drag.anchor.y)); S.zone.w = nw; S.zone.h = nh; S.zone.x = drag.anchor.x + (w.x >= drag.anchor.x ? nw / 2 : -nw / 2); S.zone.y = drag.anchor.y + (w.y >= drag.anchor.y ? nh / 2 : -nh / 2); S.planDirty = true; draw(); return; }
     const o = drag.o;
-    if (drag.kind === 'move') { o.x = w.x + drag.dx; o.y = w.y + drag.dy; constrain(o); }
+    S.frame = null; if (drag.kind === 'move') { o.x = w.x + drag.dx; o.y = w.y + drag.dy; constrain(o); }
     else { // resize from anchor, proportional
       const dw = Math.abs(w.x - drag.anchor.x), dh = Math.abs(w.y - drag.anchor.y);
       let nw = Math.max(5, Math.max(dw, dh * drag.a)); let nh = nw / drag.a;
@@ -1794,6 +1797,8 @@ window.DEXARM_PEN_OFFSET=114;
     // paper + buffer
     { const [a, b] = toScreen(P.cx - P.w / 2, P.cy + P.h / 2); ctx.fillStyle = '#ffffff'; ctx.fillRect(a, b, P.w * s, P.h * s); ctx.strokeStyle = '#9aa3b2'; ctx.lineWidth = 1; ctx.strokeRect(a, b, P.w * s, P.h * s);
       const [c, d] = toScreen(P.safe.minX, P.safe.maxY); ctx.strokeStyle = 'rgba(215,38,61,.8)'; ctx.setLineDash([5, 4]); ctx.strokeRect(c, d, P.safe.w * s, P.safe.h * s); ctx.setLineDash([]);
+      if (S.frame && S.objects.some(x => x.kind !== 'text')) { const F = S.frame, [fx, fy] = toScreen(F.x - F.w / 2, F.y + F.h / 2); ctx.save(); ctx.strokeStyle = '#7c3aed'; ctx.lineWidth = 1.5; ctx.setLineDash([7, 4]); ctx.strokeRect(fx, fy, F.w * s, F.h * s); ctx.setLineDash([]);
+        ctx.font = '600 12px system-ui, sans-serif'; const tw = ctx.measureText(F.label).width; ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.fillRect(fx, fy - 17, tw + 10, 16); ctx.fillStyle = '#7c3aed'; ctx.fillText(F.label, fx + 5, fy - 5); ctx.restore(); }
       ctx.fillStyle = '#5b6474'; ctx.fillText(`${(P.w / IN).toFixed(1)} × ${(P.h / IN).toFixed(1)} in`, a + 4, b - 5); }
     // home
     const hp = toScreen(0, 300); ctx.strokeStyle = '#006df6'; ctx.beginPath(); ctx.moveTo(hp[0] - 6, hp[1]); ctx.lineTo(hp[0] + 6, hp[1]); ctx.moveTo(hp[0], hp[1] - 6); ctx.lineTo(hp[0], hp[1] + 6); ctx.stroke(); ctx.fillStyle = '#006df6'; ctx.fillText('home', hp[0] + 8, hp[1] - 6);
@@ -1926,7 +1931,10 @@ window.DEXARM_PEN_OFFSET=114;
     const ok = await qDrawLoaded();
     if (ok && Q.on) { if (Q.unmanned) { $('qStatus').textContent = '#' + job.number + ' done ✓ — the next one starts when a guest taps "paper is in" on the iPad'; } else if ($('qPause').checked) { Q.waitingContinue = true; $('qStatus').textContent = `#${job.number} done ✓ — change the paper, then press Continue`; $('btnQContinue').style.display = ''; } else $('qStatus').textContent = `#${job.number} done ✓ — next one starts automatically`; }
   }
-  function eventWidthMm() { const v = $('qSize').value; if (v === 'fit') return null; const inches = v === 'custom' ? num('qSizeCustom') : +v; return inches > 0 ? inches * IN : null; }
+  const parseBox = id => { const m = String(id || '').match(/^(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)$/i); return m ? { w: +m[1] * IN, h: +m[2] * IN, label: `${+m[1]} × ${+m[2]} in` } : null; };
+  /** the frame every drawing (and its name) fits inside, in mm; a guest's paid size wins; null = fill the paper */
+  function eventBox() { const job = Q.current || Q.loaded; const paid = $('qPaidSize').checked && job && job.pay && job.pay.size ? parseBox(job.pay.size) : null; if (paid) { paid.label += ' (paid)'; return paid; }
+    const v = $('qSize').value; if (v === 'custom') { const w = num('qBoxW'), h = num('qBoxH'); return w > 0 && h > 0 ? { w: w * IN, h: h * IN, label: `${w} × ${h} in` } : null; } return parseBox(v); }
   /** a line of plotter text as a canvas object (strokes in font units, like an SVG) */
   function textObject(text, font, heightMm) {
     const t = HersheyText.strokes(text, font); const o = { kind: 'text', text, font, polylines: t.polylines, sw: t.w, sh: t.h, name: 'name: ' + text, id: nextId++, rot: 0, mirror: false, x: 0, y: 0, placed: [] };
@@ -1935,35 +1943,40 @@ window.DEXARM_PEN_OFFSET=114;
   /** "Josh", "Josh & Amy", "Josh & Rex" — from what the guest typed */
   function nameLabel(names) { if (!names) return ''; const parts = [names.a, names.b, names.pet].map(x => (x || '').trim()).filter(Boolean); return parts.join(' & '); }
   function applyEventSize() { // size + place the queued drawing (and the guests' names) per the event settings
-    const o = S.objects.find(x => x.kind !== 'text'); if (!o) return; const P = paper().safe; const w = eventWidthMm();
-    const txt = S.objects.find(x => x.kind === 'text'); const gap = txt ? Math.max(4, txt.h * 0.5) : 0;
-    if (w) { const a = aspect(o); o.w = Math.min(w, P.w); o.h = o.w / a; if (o.h > P.h) { o.h = P.h; o.w = o.h * a; } } else fitToPage(o);
-    if (txt) { // the name must not be wider than the drawing (or the page), and drawing + gap + name must fit the page height
-      const ta = txt.w / txt.h; txt.h = num('qNameH'); txt.w = txt.h * ta; if (txt.w > o.w) { txt.w = o.w; txt.h = txt.w / ta; }
-      const total = o.h + gap + txt.h; if (total > P.h) { const k = (P.h - gap - txt.h) / o.h; o.h *= k; o.w *= k; }
-    }
+    const o = S.objects.find(x => x.kind !== 'text'); if (!o) { S.frame = null; return; } const P = paper().safe; const box = eventBox(); const a = aspect(o);
+    const txt = S.objects.find(x => x.kind === 'text'); let gap = 0;
+    // the frame: the chosen size turned to match the picture (a tall picture gets a tall frame), never bigger than the paper's safe area
+    let fw = P.w, fh = P.h, trimmed = false; if (box) { let bw = box.w, bh = box.h; if (bw !== bh && (a > 1) !== (bw > bh)) [bw, bh] = [bh, bw]; fw = Math.min(bw, P.w); fh = Math.min(bh, P.h); trimmed = fw < bw - 0.5 || fh < bh - 0.5; }
+    if (txt) { const ta = txt.w / txt.h; txt.h = num('qNameH'); txt.w = txt.h * ta; if (txt.w > fw) { txt.w = fw; txt.h = txt.w / ta; } gap = Math.max(4, txt.h * 0.5); }
+    // drawing + gap + name fit inside the frame
+    const nameH = txt ? gap + txt.h : 0; o.w = fw; o.h = o.w / a; if (o.h > fh - nameH) { o.h = Math.max(5, fh - nameH); o.w = o.h * a; } if (txt && txt.w > o.w) { const ta = txt.w / txt.h; txt.w = o.w; txt.h = txt.w / ta; }
     let place = $('qPlace').value; const pos = $('qNamePos').value; let slide = 0; // slide: mm the group is pushed down from a 'top' placement to get within reach
     o.x = (P.minX + P.maxX) / 2;
-    const layout = () => { // anchor: centre for Centered (so shrinking stays centred), bottom edge for Bottom, top edge (minus slide) for Top
-      const groupH = o.h + (txt ? gap + txt.h : 0);
-      const top = place === 'top' ? P.maxY - slide : place === 'bottom' ? P.minY + groupH : (P.minY + P.maxY) / 2 + groupH / 2;
+    const layout = () => { // the frame is placed on the page (Centered / Top / Bottom); the drawing + name sit centred inside it
+      const groupH = o.h + (txt ? gap + txt.h : 0), FH = box ? Math.max(fh, groupH) : groupH;
+      const ftop = place === 'top' ? P.maxY - slide : place === 'bottom' ? P.minY + FH : (P.minY + P.maxY) / 2 + FH / 2;
+      const top = ftop - (FH - groupH) / 2;
+      S.frame = box ? { x: o.x, y: ftop - FH / 2, w: Math.max(fw, o.w), h: FH, label: box.label + (trimmed ? ' — trimmed to fit the paper' : '') } : null;
       if (!txt) { o.y = top - o.h / 2; return; } txt.x = o.x; if (pos === 'above') { txt.y = top - txt.h / 2; o.y = top - txt.h - gap - o.h / 2; } else { o.y = top - o.h / 2; txt.y = top - o.h - gap - txt.h / 2; } };
     layout();
     const ok = () => boxInReach(o) && (!txt || boxInReach(txt));
     for (let i = 0; i < 80 && !ok(); i++) { // Top placement: first slide the group down toward the arm; otherwise (or once it can't slide) shrink a little
       const groupH = o.h + (txt ? gap + txt.h : 0);
-      if (place === 'top' && P.maxY - slide - groupH > P.minY + 2) slide += 5; else { o.w *= 0.96; o.h *= 0.96; if (txt) { txt.w *= 0.96; txt.h *= 0.96; } }
+      if (place === 'top' && P.maxY - slide - (box ? Math.max(fh, groupH) : groupH) > P.minY + 2) slide += 5; else { o.w *= 0.96; o.h *= 0.96; if (txt) { txt.w *= 0.96; txt.h *= 0.96; } }
       layout();
     }
     if (!ok()) { // last resort: centre the group and shrink about the centre (always converges, as the pre-names code did)
       place = 'center'; slide = 0; layout(); for (let i = 0; i < 60 && !ok(); i++) { o.w *= 0.96; o.h *= 0.96; if (txt) { txt.w *= 0.96; txt.h *= 0.96; } layout(); }
       log('placement moved to centred so the arm can reach it', 'err');
     }
+    if (S.frame && o.w < Math.min(fw, (fh - nameH) * a) * 0.97) { S.frame.label += ' — drawing shrunk to stay in the arm\'s reach'; log(`drawing is ${(o.w / IN).toFixed(1)} × ${(o.h / IN).toFixed(1)} in: the arm can't reach the full ${box.label} here — move the paper closer to the arm (Paper center Y) for the full size`, 'err'); }
     constrain(o); if (txt) constrain(txt); refresh();
   }
   for (const id of ['qNames', 'qNamePos', 'qNameFont', 'qNameH']) $(id).addEventListener('change', () => { const t = S.objects.find(x => x.kind === 'text'); if (!t) return; if (!$('qNames').checked) { deleteObj(t); return; } if (id === 'qNameFont') { const n = textObject(t.text, $('qNameFont').value, num('qNameH')); S.objects[S.objects.indexOf(t)] = n; } applyEventSize(); });
-  $('qSize').addEventListener('change', () => { $('qSizeCustomRow').style.display = $('qSize').value === 'custom' ? '' : 'none'; });
-  $('qSizeCustomRow').style.display = $('qSize').value === 'custom' ? '' : 'none';
+  if (![...$('qSize').options].some(op => op.value === $('qSize').value)) $('qSize').value = 'fit'; // older saved "N in wide" values
+  const syncSizeRow = () => { $('qSizeCustomRow').style.display = $('qSize').value === 'custom' ? '' : 'none'; }; syncSizeRow();
+  async function resizeToEvent() { if (S.running || !S.objects.some(x => x.kind !== 'text')) { draw(); return; } applyEventSize(); await retraceIfScaleChanged(S.objects.find(x => x.kind === 'image')); applyEventSize(); }
+  for (const id of ['qSize', 'qBoxW', 'qBoxH', 'qPaidSize', 'qPlace']) $(id).addEventListener('change', () => { syncSizeRow(); saveSettings(); resizeToEvent(); });
   function syncQ() { try { localStorage.setItem(K('dexdraw.autoRun'), Q.on ? '1' : '0'); } catch (_) { } $('btnQAuto').textContent = Q.on ? '■ Stop auto-run' : '▶ Auto-run queue'; $('btnQAuto').classList.toggle('danger', Q.on); if (!Q.on) { Q.waitingContinue = false; $('btnQContinue').style.display = 'none'; } }
   $('btnQAuto').addEventListener('click', () => { if (!link.connected) { log('connect the arm first', 'err'); return; } if (S.needsHome) { log('press ⌂ Home first (STOP was used)', 'err'); return; } Q.on = !Q.on; syncQ(); if (Q.on) { log('auto-run on: setup must be done (Home, pen height, paper center)'); qRefresh(); } });
   $('btnQNext').addEventListener('click', () => { if (!link.connected) { log('connect the arm first', 'err'); return; } if (S.needsHome) { log('press ⌂ Home first (STOP was used)', 'err'); return; } qLoadNext(); });
