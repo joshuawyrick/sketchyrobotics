@@ -288,6 +288,7 @@
     </section>
   </aside>
 </main>
+<script src="/vendor/opentype.min.js"></script>
 <script>
 // Reach table from Rotrics Studio (MIT): [z, maxRadius, minRadius] in mm from the base axis.
 // Pen module adds 114 mm (101.5 + 12.5) to both radii; firmware keeps a 2 mm safety margin.
@@ -1888,11 +1889,13 @@ window.DEXARM_PEN_OFFSET=114;
     if (Q.busy || S.running || Q.loaded) return false; Q.busy = true; $('btnQNext').disabled = true; let job = null;
     try {
       let wait, since; ({ job, wait, since } = await qFetch('/api/queue/claim', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bot: BOT }) })); if (!job) { if (wait === 'paper') { $('qStatus').textContent = 'waiting for the guest to put in fresh paper (' + Math.round((Date.now() - since) / 1000) + ' s)… or press "Paper is in" if you changed it yourself'; $('btnQPaper').style.display = ''; } else { $('qStatus').textContent = 'Nothing ready yet — it loads as soon as a guest\'s sketch is finished.'; $('btnQPaper').style.display = 'none'; } return false; } $('btnQPaper').style.display = 'none';
-      Q.current = job; $('qStatus').textContent = `#${job.number} ${job.themeName}: converting…`;
+      Q.current = job; S.namePos = null; $('qStatus').textContent = `#${job.number} ${job.themeName}: converting…`;
       S.nextProportions = job.proportions || (/big\s*-?\s*head/i.test(job.themeName || '') ? 'bighead' : 'normal');
       await loadFromUrl(`/api/jobs/${job.id}/art`, `queue-${job.number}.png`);
       await new Promise(r => setTimeout(r, 400)); for (let i = 0; i < 100 && (S.planDirty || !S.plan); i++) await new Promise(r => setTimeout(r, 200)); // trace worker + planner
-      const label = nameLabel(job.names); if (label && $('qNames').checked) { const t = textObject(label, $('qNameFont').value, num('qNameH')); S.objects.push(t); log(`name lettering: "${label}"`); }
+      const label = nameLabel(job.names);
+      if (label && job.lettering) { let t; try { t = await outlineText(label, job.lettering); log(`name lettering: "${label}" in ${job.lettering.font.name}, ${job.lettering.heightMm} mm`); } catch (e) { t = textObject(label, 'Script', job.lettering.heightMm); log(`couldn't use ${job.lettering.font.name} (${e.message}) — lettered "${label}" in the plain font`, 'err'); } S.objects.push(t); S.namePos = job.lettering.position; }
+      else if (label && $('qNames').checked) { const t = textObject(label, $('qNameFont').value, num('qNameH')); S.objects.push(t); log(`name lettering: "${label}"`); }
       applyEventSize(); await retraceIfScaleChanged(S.objects.find(x => x.kind === 'image')); applyEventSize(); for (let i = 0; i < 50 && S.planDirty; i++) await new Promise(r => setTimeout(r, 100));
       if (S.block) throw new Error(S.block);
       Q.loaded = job; Q.current = null; syncStep();
@@ -1940,6 +1943,22 @@ window.DEXARM_PEN_OFFSET=114;
     const t = HersheyText.strokes(text, font); const o = { kind: 'text', text, font, polylines: t.polylines, sw: t.w, sh: t.h, name: 'name: ' + text, id: nextId++, rot: 0, mirror: false, x: 0, y: 0, placed: [] };
     o.h = heightMm; o.w = heightMm * t.w / t.h; return o;
   }
+  // guest names in a real font (Admin → Guest names), drawn as the letter OUTLINE: the letters are filled on a canvas so
+  // overlaps merge, then traced half a pen-width inside the edge — the drawn line's outer edge is the font's edge
+  const FONTCACHE = {};
+  function loadFontUrl(url) { if (!FONTCACHE[url]) FONTCACHE[url] = fetch(url).then(r => { if (!r.ok) throw new Error('font download ' + r.status); return r.arrayBuffer(); }).then(b => opentype.parse(b)).catch(e => { delete FONTCACHE[url]; throw e; }); return FONTCACHE[url]; }
+  async function outlineText(text, lt) {
+    if (typeof opentype === 'undefined') throw new Error('font reader not loaded');
+    const font = await loadFontUrl(lt.font.url), RES = 24; // px per mm
+    let b = font.getPath(text, 0, 0, 100).getBoundingBox(); const inkH = Math.max(1, b.y2 - b.y1); const size = 100 * lt.heightMm * RES / inkH;
+    b = font.getPath(text, 0, 0, size).getBoundingBox(); const pad = 8, w = Math.ceil(b.x2 - b.x1) + pad * 2, h = Math.ceil(b.y2 - b.y1) + pad * 2; if (w * h > 30e6) throw new Error('name too long to letter');
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const g = cv.getContext('2d', { willReadFrequently: true }); g.fillStyle = '#000'; g.fill(new Path2D(font.getPath(text, pad - b.x1, pad - b.y1, size).toPathData(3)));
+    const px = g.getImageData(0, 0, w, h).data, m = new Uint8Array(w * h); for (let i = 0; i < m.length; i++) m[i] = px[i * 4 + 3] > 127 ? 1 : 0;
+    const dist = ImageTrace.distanceTransform(m, w, h); const inset = Math.max(0.6, num('penW') * RES / 2);
+    let polys = ImageTrace.contours(dist, w, h, inset); if (!polys.length) polys = ImageTrace.contours(dist, w, h, 0.6); // hairline fonts: trace the edge itself
+    polys = polys.filter(c => c.length > 4).map(c => Planner.smooth(c, 2)); if (!polys.length) throw new Error('nothing to draw');
+    return { kind: 'text', text, font: lt.font.name, polylines: polys, sw: w, sh: h, boxH: h / RES, name: 'name: ' + text, id: nextId++, rot: 0, mirror: false, x: 0, y: 0, placed: [], h: h / RES, w: w / RES };
+  }
   /** "Josh", "Josh & Amy", "Josh & Rex" — from what the guest typed */
   function nameLabel(names) { if (!names) return ''; const parts = [names.a, names.b, names.pet].map(x => (x || '').trim()).filter(Boolean); return parts.join(' & '); }
   function applyEventSize() { // size + place the queued drawing (and the guests' names) per the event settings
@@ -1947,10 +1966,10 @@ window.DEXARM_PEN_OFFSET=114;
     const txt = S.objects.find(x => x.kind === 'text'); let gap = 0;
     // the frame: the chosen size turned to match the picture (a tall picture gets a tall frame), never bigger than the paper's safe area
     let fw = P.w, fh = P.h, trimmed = false; if (box) { let bw = box.w, bh = box.h; if (bw !== bh && (a > 1) !== (bw > bh)) [bw, bh] = [bh, bw]; fw = Math.min(bw, P.w); fh = Math.min(bh, P.h); trimmed = fw < bw - 0.5 || fh < bh - 0.5; }
-    if (txt) { const ta = txt.w / txt.h; txt.h = num('qNameH'); txt.w = txt.h * ta; if (txt.w > fw) { txt.w = fw; txt.h = txt.w / ta; } gap = Math.max(4, txt.h * 0.5); }
+    if (txt) { const ta = txt.w / txt.h; txt.h = txt.boxH || num('qNameH'); txt.w = txt.h * ta; if (txt.w > fw) { txt.w = fw; txt.h = txt.w / ta; } gap = Math.max(4, txt.h * 0.5); }
     // drawing + gap + name fit inside the frame
     const nameH = txt ? gap + txt.h : 0; o.w = fw; o.h = o.w / a; if (o.h > fh - nameH) { o.h = Math.max(5, fh - nameH); o.w = o.h * a; } if (txt && txt.w > o.w) { const ta = txt.w / txt.h; txt.w = o.w; txt.h = txt.w / ta; }
-    let place = $('qPlace').value; const pos = $('qNamePos').value; let slide = 0; // slide: mm the group is pushed down from a 'top' placement to get within reach
+    let place = $('qPlace').value; const pos = S.namePos || $('qNamePos').value; let slide = 0; // slide: mm the group is pushed down from a 'top' placement to get within reach
     o.x = (P.minX + P.maxX) / 2;
     const layout = () => { // the frame is placed on the page (Centered / Top / Bottom); the drawing + name sit centred inside it
       const groupH = o.h + (txt ? gap + txt.h : 0), FH = box ? Math.max(fh, groupH) : groupH;

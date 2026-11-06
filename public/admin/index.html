@@ -83,7 +83,8 @@
       <div class="row"><label>Order (lower = first)</label><input type="number" id="teOrder" style="max-width:100px"></div>
       <div class="row"><label>Image model for this theme</label><select id="teModel" style="max-width:300px"></select><span class="note">Blank = the model in Settings. Pick one here if it draws this theme better.</span></div>
       <div class="row"><label>Audience</label><select id="teRating" style="width:auto"><option value="family">Family</option><option value="adult">Adult (18+)</option></select><span class="note">Family themes show at every event; adult themes only at 18+ events (Settings → "Themes shown").</span>
-        <label style="width:auto;margin-left:14px">Proportions</label><select id="teProp" style="width:auto"><option value="normal">Normal</option><option value="bighead">Big head</option></select></div>
+        <label style="width:auto;margin-left:14px">Proportions</label><select id="teProp" style="width:auto"><option value="normal">Normal</option><option value="bighead">Big head</option></select>
+        <label style="width:auto;margin-left:14px">Name lettering</label><select id="teLetter" style="width:auto"><option value="">Default font</option></select></div>
       <div class="row"><label>Quality for this theme</label><select id="teQuality"><option value="">(use Settings)</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="auto">auto</option></select>
         <label style="width:auto;margin-left:14px">Moderation</label><select id="teMod"><option value="">(use Settings)</option><option value="low">low</option><option value="auto">auto</option></select><span class="note">Each combination can also pick its own model below — that wins over these.</span></div>
       <div class="row"><label>Thumbnail (any shape; shown whole)</label><input type="file" id="teThumb" accept="image/*"><img id="teThumbPrev" style="height:90px;max-width:160px;object-fit:contain;background:#fff;border-radius:8px;border:1px solid var(--line)"></div>
@@ -208,9 +209,21 @@
       <div class="row"><label>Admin password</label><span class="note">Set as the Secret <code>ADMIN_PASSWORD</code> in Replit (default "sketchy").</span></div>
       <div class="row"><button class="primary" id="sSave">Save settings</button><span id="sMsg" class="ok"></span></div>
     </div>
+    <div class="card"><h2>Guest names <span class="note">guests type their names on the iPad; the arm writes them above or below the drawing as the outline of the font you pick</span></h2>
+      <div class="row"><label>Ask guests for their names</label><input type="checkbox" id="lnOn"><span class="note">turns on the name screen on the iPad (names are optional for guests)</span></div>
+      <div class="row"><label>Default font</label><select id="lnFont" style="width:auto"></select><span class="note">a theme can pick its own: Themes → the theme → Name lettering</span></div>
+      <div class="row"><label>Name height</label><input type="number" id="lnH" min="4" max="60" step="1" style="max-width:90px"><span class="note">mm tall (14 mm ≈ ½ inch) · long names shrink to fit the drawing size</span></div>
+      <div class="row"><label>Position</label><select id="lnPos" style="width:auto"><option value="below">below the drawing</option><option value="above">above the drawing</option></select></div>
+      <div class="row"><label>Preview text</label><input type="text" id="lnSample" value="Josh &amp; Amy" style="max-width:240px"><span class="note">just for the previews below</span></div>
+      <div id="lnFonts" class="lnGrid"></div>
+      <div class="row"><button id="lnAdd">+ Add a font…</button><input type="file" id="lnFile" accept=".ttf,.otf,.woff" style="display:none"><span class="note">.ttf, .otf or .woff. From fonts.google.com: open the font → "Get font" → Download → upload the .ttf from the zip. Make sure its license allows commercial use (every Google font does).</span></div>
+      <div class="row"><button class="primary" id="lnSave">Save guest names</button><span id="lnMsg" class="ok"></span></div>
+    </div>
   </section>
 </main>
 <div id="toast"></div>
+<script src="/vendor/opentype.min.js"></script>
+<style>.lnGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;margin:10px 0}.lnCard{border:1px solid #dfe5ee;border-radius:10px;padding:8px 10px;background:#fff}.lnCard.def{border:2px solid #006df6;background:#f3f8ff;padding:7px 9px}.lnCard canvas{width:100%;height:64px;display:block}.lnCard .lnh{display:flex;align-items:center;gap:6px;font-size:13px}.lnCard .lnh b{flex:1}.lnCard .lnb{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:#5b6478}.lnCard input{max-width:60px;padding:3px 5px}.lnCard button{padding:2px 8px;font-size:12px}</style>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
@@ -229,8 +242,32 @@
     try { STATE = await api('/api/admin/state'); } catch (e) { return; }
     $('login').style.display = 'none'; applyRole();
     renderQueue(); if (STATE.me.role === 'admin') { renderThemes(); renderSettings(); renderTest(); }
-    if (!refresh.modelsLoaded && STATE.me.role === 'admin') { refresh.modelsLoaded = true; loadModels(false); loadLab(); ltLoad(); }
+    if (!refresh.modelsLoaded && STATE.me.role === 'admin') { refresh.modelsLoaded = true; loadModels(false); loadLab(); ltLoad(); loadLettering(); }
   }
+  // ----- guest names / lettering -----
+  const LN = { l: null, fonts: [], parsed: {} };
+  async function loadLettering() { try { const d = await api('/api/admin/lettering'); LN.l = d.lettering; LN.fonts = d.fonts; renderLettering(); if (editing) fillThemeLetter($('teLetter').value); } catch (_) {} }
+  function fillThemeLetter(cur) { const sel = $('teLetter'); const def = LN.fonts.find(f => LN.l && f.id === LN.l.font); sel.innerHTML = `<option value="">Default font${def ? ' (' + def.name + ')' : ''}</option>` + LN.fonts.map(f => `<option value="${f.id}">${f.name}</option>`).join(''); sel.value = LN.fonts.some(f => f.id === cur) ? cur : ''; }
+  async function fontOf(f) { if (LN.parsed[f.url]) return LN.parsed[f.url]; const buf = await fetch(f.url + (f.builtin ? '' : '?token=' + encodeURIComponent(TOKEN))).then(r => { if (!r.ok) throw new Error('font ' + r.status); return r.arrayBuffer(); }); return (LN.parsed[f.url] = opentype.parse(buf)); }
+  /** preview = the outline the arm draws: stroke the letters, then fill them white so overlaps inside joined letters disappear */
+  async function drawPreview(cv, f, text) { const r = cv.getBoundingClientRect(); const W = Math.max(200, Math.round(r.width * 2)), H = 128; cv.width = W; cv.height = H; const g = cv.getContext('2d'); g.clearRect(0, 0, W, H);
+    try { const font = await fontOf(f); let size = 100; let p = font.getPath(text, 0, 0, size); let b = p.getBoundingBox(); const k = Math.min((W - 16) / Math.max(1, b.x2 - b.x1), (H - 16) / Math.max(1, b.y2 - b.y1)); size *= k; p = font.getPath(text, 0, 0, size); b = p.getBoundingBox();
+      const path = new Path2D(font.getPath(text, (W - (b.x2 - b.x1)) / 2 - b.x1, (H - (b.y2 - b.y1)) / 2 - b.y1, size).toPathData(2)); g.lineJoin = 'round'; g.lineWidth = 3.2; g.strokeStyle = '#111'; g.stroke(path); g.fillStyle = '#fff'; g.fill(path);
+    } catch (e) { g.fillStyle = '#b4232c'; g.font = '14px system-ui'; g.fillText('could not read this font', 10, 30); } }
+  function renderLettering() { const l = LN.l; if (!l) return; $('lnOn').checked = !!l.enabled; $('lnH').value = l.heightMm; $('lnPos').value = l.position; $('lnFont').innerHTML = LN.fonts.map(f => `<option value="${f.id}">${f.name}</option>`).join(''); $('lnFont').value = l.font;
+    $('lnFonts').innerHTML = LN.fonts.map(f => `<div class="lnCard ${f.id === l.font ? 'def' : ''}" data-id="${f.id}"><div class="lnh"><b>${f.name}</b>${f.id === l.font ? '<span class="note">default</span>' : `<button data-lndef="${f.id}" title="Make this the default font">Make default</button>`}${f.builtin ? '' : `<button class="danger" data-lndel="${f.id}" title="Remove this font">✕</button>`}</div><canvas></canvas><div class="lnb">size <input type="number" min="4" max="60" step="1" data-lnsize="${f.id}" value="${l.sizes[f.id] || ''}" placeholder="${l.heightMm}"> mm <span>(blank = default)</span></div></div>`).join('');
+    $('lnFonts').querySelectorAll('.lnCard').forEach(c => drawPreview(c.querySelector('canvas'), LN.fonts.find(f => f.id === c.dataset.id), $('lnSample').value || 'Josh & Amy'));
+    $('lnFonts').querySelectorAll('[data-lndef]').forEach(b => b.onclick = () => { LN.l.font = b.dataset.lndef; renderLettering(); $('lnMsg').textContent = 'not saved yet'; });
+    $('lnFonts').querySelectorAll('[data-lndel]').forEach(b => b.onclick = async () => { const f = LN.fonts.find(x => x.id === b.dataset.lndel); if (!confirm(`Remove the font "${f.name}"? Themes that used it go back to the default font.`)) return; try { const d = await api('/api/admin/fonts/' + f.id, { method: 'DELETE' }); LN.fonts = d.fonts; await loadLettering(); toast(`${f.name} removed`); } catch (e) { toast(e.message, 'bad'); } }); }
+  $('lnSample').oninput = () => { clearTimeout(LN.t); LN.t = setTimeout(renderLettering, 250); };
+  $('lnFont').onchange = () => { LN.l.font = $('lnFont').value; renderLettering(); $('lnMsg').textContent = 'not saved yet'; };
+  $('lnH').onchange = () => { LN.l.heightMm = +$('lnH').value || 14; renderLettering(); };
+  $('lnSave').onclick = async () => { const sizes = {}; $('lnFonts').querySelectorAll('[data-lnsize]').forEach(i => { if (+i.value > 0) sizes[i.dataset.lnsize] = +i.value; });
+    try { const d = await api('/api/admin/lettering', { method: 'POST', json: { enabled: $('lnOn').checked, font: $('lnFont').value, heightMm: +$('lnH').value || 14, position: $('lnPos').value, sizes } }); LN.l = d.lettering; LN.fonts = d.fonts; renderLettering(); $('lnMsg').textContent = 'Saved ✓'; toast(d.lettering.enabled ? 'Guest names on — the iPads show the name screen within 30 seconds' : 'Guest names saved (off)'); setTimeout(() => $('lnMsg').textContent = '', 2500); } catch (e) { toast(e.message, 'bad'); } };
+  $('lnAdd').onclick = () => $('lnFile').click();
+  $('lnFile').onchange = async () => { const f = $('lnFile').files[0]; $('lnFile').value = ''; if (!f) return; const name = prompt('Name for this font:', f.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').replace(/\bRegular\b/i, '').trim()); if (name === null) return;
+    const fd = new FormData(); fd.append('font', f); fd.append('name', name); try { const r = await fetch('/api/admin/fonts', { method: 'POST', headers: { 'x-admin-token': TOKEN }, body: fd }); const d = await r.json(); if (!r.ok) throw new Error(d.error || r.status); await loadLettering(); toast(`${d.font.name} added`); } catch (e) { toast(e.message, 'bad'); } };
+
   // ----- queue -----
   const fmt = ms => { const d = new Date(ms); return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
   const fmtS = sec => sec ? `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}` : '';
@@ -292,7 +329,7 @@
     const t = STATE.themes.find(x => x.slug === slug); if (!t) { editing = null; $('themeEdit').style.display = 'none'; return; }
     editing = slug; $('themeEdit').style.display = ''; $('exportOne').href = '/api/admin/themes/export?slug=' + encodeURIComponent(slug) + '&token=' + encodeURIComponent(TOKEN);
     if (!keep) { $('teName').textContent = t.name; $('teNameIn').value = t.name; $('teEnabled').checked = t.enabled !== false; $('teOrder').value = t.order || 0;
-      if (t.model && ![...$('teModel').options].some(o => o.value === t.model)) $('teModel').insertAdjacentHTML('beforeend', `<option value="${t.model}">${t.model}</option>`); $('teModel').value = t.model || ''; $('teQuality').value = t.quality || ''; $('teMod').value = t.moderation || ''; $('teRating').value = t.rating || 'family'; $('teProp').value = t.proportions || 'normal';
+      if (t.model && ![...$('teModel').options].some(o => o.value === t.model)) $('teModel').insertAdjacentHTML('beforeend', `<option value="${t.model}">${t.model}</option>`); $('teModel').value = t.model || ''; $('teQuality').value = t.quality || ''; $('teMod').value = t.moderation || ''; $('teRating').value = t.rating || 'family'; $('teProp').value = t.proportions || 'normal'; fillThemeLetter(t.lettering || '');
       $('prompts').innerHTML = STATE.variantOrder.map(v => { const vm = t.variantModels[v] || {}; return `<div class="prompt"><h3>${STATE.variants[v]} <span class="cnt" id="cnt-${v}"></span></h3><textarea data-v="${v}" placeholder="Paste the master prompt for: ${STATE.variants[v]} — or build it in the Prompt Lab">${t.prompts[v] || ''}</textarea><div class="note" style="margin-top:4px">Model for this combination: <select class="vmModel" data-v="${v}" style="max-width:260px"></select> quality <select class="vmQ" data-v="${v}"><option value="">(default)</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="auto">auto</option></select></div></div>`; }).join('');
       $('prompts').querySelectorAll('.vmModel').forEach(sel => { const vm = t.variantModels[sel.dataset.v] || {}; sel.innerHTML = '<option value="">(theme default)</option>' + Array.from(new Set(MODELS.concat(vm.model ? [vm.model] : []))).sort().map(m => `<option value="${m}">${m}</option>`).join(''); sel.value = vm.model || ''; });
       $('prompts').querySelectorAll('.vmQ').forEach(sel => { sel.value = (t.variantModels[sel.dataset.v] || {}).quality || ''; });
@@ -301,7 +338,7 @@
     $('teThumbPrev').src = t.hasThumb ? `/api/themes/${slug}/thumb?v=${Date.now()}` : ''; $('teThumbPrev').style.display = t.hasThumb ? '' : 'none';
   }
   $('addTheme').onclick = async () => { const name = $('newName').value.trim(); if (!name) return; const t = await api('/api/admin/themes', { method: 'POST', json: { name } }); $('newName').value = ''; editing = t.slug; await refresh(); openTheme(t.slug); toast('Theme "' + name + '" created — add prompts and a thumbnail, then Save'); };
-  $('teSave').onclick = async () => { try { const prompts = {}; $('prompts').querySelectorAll('textarea').forEach(ta => prompts[ta.dataset.v] = ta.value); const variantModels = {}; $('prompts').querySelectorAll('.vmModel').forEach(sel => { variantModels[sel.dataset.v] = { model: sel.value, quality: $('prompts').querySelector(`.vmQ[data-v="${sel.dataset.v}"]`).value }; }); await api('/api/admin/themes/' + editing, { method: 'PUT', json: { name: $('teNameIn').value.trim() || 'Theme', enabled: $('teEnabled').checked, order: +$('teOrder').value || 0, model: $('teModel').value, quality: $('teQuality').value, moderation: $('teMod').value, rating: $('teRating').value, proportions: $('teProp').value, prompts, variantModels } }); $('teMsg').textContent = 'Saved ✓'; toast('Theme "' + ($('teNameIn').value.trim() || 'Theme') + '" saved — prompts are live on the iPad'); setTimeout(() => $('teMsg').textContent = '', 4000); await refresh(); } catch (e) { toast('Save failed: ' + e.message, 'bad'); } };
+  $('teSave').onclick = async () => { try { const prompts = {}; $('prompts').querySelectorAll('textarea').forEach(ta => prompts[ta.dataset.v] = ta.value); const variantModels = {}; $('prompts').querySelectorAll('.vmModel').forEach(sel => { variantModels[sel.dataset.v] = { model: sel.value, quality: $('prompts').querySelector(`.vmQ[data-v="${sel.dataset.v}"]`).value }; }); await api('/api/admin/themes/' + editing, { method: 'PUT', json: { name: $('teNameIn').value.trim() || 'Theme', enabled: $('teEnabled').checked, order: +$('teOrder').value || 0, model: $('teModel').value, quality: $('teQuality').value, moderation: $('teMod').value, rating: $('teRating').value, proportions: $('teProp').value, lettering: $('teLetter').value, prompts, variantModels } }); $('teMsg').textContent = 'Saved ✓'; toast('Theme "' + ($('teNameIn').value.trim() || 'Theme') + '" saved — prompts are live on the iPad'); setTimeout(() => $('teMsg').textContent = '', 4000); await refresh(); } catch (e) { toast('Save failed: ' + e.message, 'bad'); } };
   let importTarget = null; // slug when importing into one chosen theme
   $('importBtn').onclick = () => { importTarget = null; $('importZip').click(); };
   $('importInto').onclick = () => { importTarget = editing; $('importZip').click(); };

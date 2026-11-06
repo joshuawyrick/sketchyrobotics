@@ -82,7 +82,7 @@ function listThemes() { return fs.readdirSync(THEMES).filter(s => !s.startsWith(
 function writeTheme(slug, t) {
   const dir = path.join(THEMES, slug); fs.mkdirSync(path.join(dir, 'prompts'), { recursive: true });
   const vm = {}; for (const v of VARIANTS) { const x = t.variantModels && t.variantModels[v]; if (x && (x.model || x.quality)) vm[v] = { model: x.model || '', quality: x.quality || '' }; }
-  fs.writeFileSync(path.join(dir, 'theme.json'), JSON.stringify({ name: t.name, enabled: t.enabled !== false, order: t.order || 0, model: t.model || '', quality: t.quality || '', moderation: t.moderation || '', rating: t.rating === 'adult' ? 'adult' : 'family', proportions: t.proportions === 'bighead' ? 'bighead' : 'normal', variantModels: vm, thumbFrom: t.thumbFrom || '' }, null, 2)); persist(path.join(dir, 'theme.json')); // model/quality: blank = use Settings; variantModels: per-combination overrides
+  fs.writeFileSync(path.join(dir, 'theme.json'), JSON.stringify({ name: t.name, enabled: t.enabled !== false, order: t.order || 0, model: t.model || '', quality: t.quality || '', moderation: t.moderation || '', rating: t.rating === 'adult' ? 'adult' : 'family', proportions: t.proportions === 'bighead' ? 'bighead' : 'normal', variantModels: vm, thumbFrom: t.thumbFrom || '', lettering: t.lettering || '' }, null, 2)); persist(path.join(dir, 'theme.json')); // model/quality: blank = use Settings; variantModels: per-combination overrides
   if (t.prompts) for (const v of VARIANTS) if (v in t.prompts) { const f = path.join(dir, 'prompts', v + '.txt'); fs.writeFileSync(f, String(t.prompts[v] || '')); persist(f); }
 }
 
@@ -97,7 +97,17 @@ function loadState() {
   seq = Math.max(0, ...[...jobs.values()].map(j => j.number || 0));
 }
 function saveJob(j) { fs.mkdirSync(path.join(JOBS, j.id), { recursive: true }); const f = path.join(JOBS, j.id, 'job.json'); fs.writeFileSync(f, JSON.stringify(j, null, 2)); jobs.set(j.id, j); if (!j.test || j.lab) persist(f); }
-function publicJob(j) { const { id, number, status, theme, themeName, proportions, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset, names, bot, pay, pad } = j; return { id, number, status, theme, themeName, proportions, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset, names, bot, pad, pay: pay ? { size: pay.size, label: pay.label, amount: pay.amount, paidAt: pay.paidAt, method: pay.method } : null }; }
+// ---------- guest names: drawn under/over the drawing as the outline of a real font (built-in or uploaded) ----------
+const FONTS_DIR = path.join(DATA, 'fonts'); fs.mkdirSync(FONTS_DIR, { recursive: true });
+const BUILTIN_FONTS = [['pacifico', 'Pacifico'], ['lobster', 'Lobster'], ['pirata-one', 'Pirata One'], ['creepster', 'Creepster'], ['black-ops-one', 'Black Ops One'], ['playball', 'Playball'], ['bebas-neue', 'Bebas Neue'], ['luckiest-guy', 'Luckiest Guy']].map(([id, name]) => ({ id, name, url: `/fonts/${id}.woff`, builtin: true }));
+const LETTERING_DEFAULT = { enabled: false, font: 'pacifico', heightMm: 14, position: 'below', fonts: [], sizes: {} };
+function lettering() { const l = Object.assign({}, LETTERING_DEFAULT, getSettings().lettering || {}); l.fonts = Array.isArray(l.fonts) ? l.fonts : []; l.sizes = l.sizes && typeof l.sizes === 'object' ? l.sizes : {}; return l; }
+function allFonts(l) { l = l || lettering(); return BUILTIN_FONTS.concat(l.fonts.map(f => ({ id: f.id, name: f.name, url: `/api/fonts/${f.id}`, builtin: false }))); }
+/** the font + size a job's names are drawn in: the theme's own font, else the default; null when names are off */
+function letteringFor(slug) { const l = lettering(); if (!l.enabled) return null; const t = slug ? readTheme(slug) : null; const fonts = allFonts(l);
+  const f = fonts.find(x => x.id === (t && t.lettering)) || fonts.find(x => x.id === l.font) || fonts[0]; return { font: f, heightMm: Math.max(4, Math.min(60, +(l.sizes[f.id] || l.heightMm) || 14)), position: l.position === 'above' ? 'above' : 'below' }; }
+const hasNames = n => !!(n && (n.a || n.b || n.pet));
+function publicJob(j) { const { id, number, status, theme, themeName, proportions, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset, names, bot, pay, pad } = j; return { id, number, status, theme, themeName, proportions, variant, createdAt, readyAt, doneAt, error, attempts, position, drawSeconds, strokes, widthMm, preset, names, lettering: hasNames(names) ? letteringFor(theme) : null, bot, pad, pay: pay ? { size: pay.size, label: pay.label, amount: pay.amount, paidAt: pay.paidAt, method: pay.method } : null }; }
 // ---------- payments (Stripe Checkout: the iPad shows a QR, the guest pays on their own phone) ----------
 function cleanPay(p) { const sizes = Array.isArray(p.sizes) ? p.sizes : []; return { enabled: !!p.enabled, sizes: sizes.map(z => ({ id: String(z.id || '').replace(/[^0-9a-z.x]/gi, '').slice(0, 12), label: String(z.label || z.id || '').slice(0, 30), price: Math.max(0, Math.round(+z.price || 0)), enabled: z.enabled !== false })).filter(z => z.id) }; }
 const paySizes = () => ((getSettings().pay || {}).sizes || []).filter(z => z.enabled && z.price > 0);
@@ -219,6 +229,9 @@ function newSession(se) { const t = crypto.randomBytes(24).toString('hex'); sess
 app.use('/studio', express.static(path.join(ROOT, 'public', 'studio')));
 app.use('/admin', express.static(path.join(ROOT, 'public', 'admin')));
 app.use('/start', express.static(path.join(ROOT, 'public', 'start'))); // operator start page: sign in once, open everything
+app.use('/fonts', express.static(path.join(ROOT, 'public', 'fonts'), { maxAge: '7d' })); // built-in lettering fonts
+app.use('/vendor', express.static(path.join(ROOT, 'public', 'vendor'), { maxAge: '7d' }));
+app.get('/api/fonts/:id', async (req, res) => { const f = lettering().fonts.find(x => x.id === req.params.id); if (!f) return res.status(404).end(); const file = path.join(FONTS_DIR, f.file); if (!(await ensureLocal(file))) return res.status(404).end(); res.setHeader('cache-control', 'public, max-age=86400'); res.sendFile(file); });
 app.use('/', express.static(path.join(ROOT, 'public', 'guest')));
 app.get('/p/:code', (req, res) => res.sendFile(path.join(ROOT, 'public', 'phone', 'index.html'))); // guest's own phone: scanned from the iPad's QR
 
@@ -259,7 +272,7 @@ app.get('/api/phone/:code/photo', (req, res) => { const v = phoneCodes.get(req.p
 // ----- public (guest) -----
 /** which themes guests can pick: 18+ events show every theme (family and adult), family events only family themes */
 const shownToGuests = (t, s) => t.enabled && (s.eventMode === 'adult' || t.rating !== 'adult');
-app.get('/api/themes', (req, res) => res.json({ themes: listThemes().filter(t => shownToGuests(t, getSettings())).map(t => ({ slug: t.slug, name: t.name, hasThumb: t.hasThumb, variants: VARIANTS.filter(v => t.prompts[v].trim()) })), variants: VARIANT_LABELS, event: getSettings().eventName, cameraZoom: getSettings().cameraZoom, build: BUILD, pay: payOn() ? { sizes: paySizes().map(z => ({ id: z.id, label: z.label, price: z.price, text: money(z.price) })) } : null, bots: botCount() }));
+app.get('/api/themes', (req, res) => res.json({ names: lettering().enabled, themes: listThemes().filter(t => shownToGuests(t, getSettings())).map(t => ({ slug: t.slug, name: t.name, hasThumb: t.hasThumb, variants: VARIANTS.filter(v => t.prompts[v].trim()) })), variants: VARIANT_LABELS, event: getSettings().eventName, cameraZoom: getSettings().cameraZoom, build: BUILD, pay: payOn() ? { sizes: paySizes().map(z => ({ id: z.id, label: z.label, price: z.price, text: money(z.price) })) } : null, bots: botCount() }));
 app.get('/api/themes/:slug/thumb', (req, res) => { const f = path.join(THEMES, slugify(req.params.slug), 'thumb.png'); if (fs.existsSync(f)) res.sendFile(f); else res.status(404).end(); });
 // ---------- remote submissions: one standing link/QR per event; guests pick a theme and send a photo from anywhere ----------
 const newCode = () => crypto.randomBytes(4).toString('hex').slice(0, 6);
@@ -370,6 +383,24 @@ app.post('/api/admin/presets', adminAuth, (req, res) => { // save the current se
 app.post('/api/admin/presets/:id/apply', adminAuth, (req, res) => { const s = getSettings(); const pr = (s.presets || []).find(x => x.id === req.params.id); if (!pr) return res.status(404).end(); for (const k of PRESET_KEYS) if (k in pr) s[k] = pr[k]; saveSettings(s); res.json(Object.assign({ ok: true }, s)); });
 app.delete('/api/admin/presets/:id', adminAuth, (req, res) => { const s = getSettings(); s.presets = (s.presets || []).filter(x => x.id !== req.params.id); saveSettings(s); res.json({ ok: true, presets: s.presets }); });
 app.post('/api/admin/themes', adminAuth, (req, res) => { const name = String(req.body.name || '').trim(); if (!name) return res.status(400).json({ error: 'name required' }); let slug = slugify(name); if (readTheme(slug)) slug += '-' + Date.now().toString(36); writeTheme(slug, { name, enabled: true, order: listThemes().length + 1, prompts: {} }); res.json(readTheme(slug)); });
+// ----- name lettering (Admin → Settings → Guest names) -----
+app.get('/api/admin/lettering', adminAuth, (req, res) => { const l = lettering(); res.json({ lettering: { enabled: l.enabled, font: l.font, heightMm: l.heightMm, position: l.position, sizes: l.sizes }, fonts: allFonts(l) }); });
+app.post('/api/admin/lettering', adminAuth, (req, res) => { const s = getSettings(); const l = lettering(); const q = req.body || {}; const ids = allFonts(l).map(f => f.id);
+  if ('enabled' in q) l.enabled = !!q.enabled; if ('font' in q && ids.includes(q.font)) l.font = q.font; if ('heightMm' in q) l.heightMm = Math.max(4, Math.min(60, +q.heightMm || 14)); if ('position' in q) l.position = q.position === 'above' ? 'above' : 'below';
+  if (q.sizes && typeof q.sizes === 'object') { l.sizes = {}; for (const [k, v] of Object.entries(q.sizes)) if (ids.includes(k) && +v > 0) l.sizes[k] = Math.max(4, Math.min(60, +v)); }
+  s.lettering = l; saveSettings(s); res.json({ ok: true, lettering: l, fonts: allFonts(l) }); });
+/** add a font: .ttf / .otf / .woff (WOFF2 can't be read for outlines — use the .ttf from the Google Fonts download) */
+app.post('/api/admin/fonts', adminAuth, upload.single('font'), (req, res) => { const f = req.file; if (!f) return res.status(400).json({ error: 'choose a font file' });
+  const sig = f.buffer.slice(0, 4).toString('latin1'), hex = f.buffer.slice(0, 4).toString('hex'); const ext = hex === '00010000' || sig === 'true' ? 'ttf' : sig === 'OTTO' ? 'otf' : sig === 'wOFF' ? 'woff' : null;
+  if (sig === 'wOF2') return res.status(400).json({ error: 'That is a WOFF2 file, which can\'t be used for outlines. Download the font from fonts.google.com ("Get font" → Download) and upload the .ttf file from the zip.' });
+  if (!ext) return res.status(400).json({ error: 'That doesn\'t look like a font file — upload a .ttf, .otf or .woff file.' });
+  const name = String(req.body.name || f.originalname.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').replace(/\b(Regular|regular)\b/, '').trim() || 'Font').slice(0, 40);
+  const s = getSettings(); const l = lettering(); let id = slugify(name) || 'font'; const taken = new Set(allFonts(l).map(x => x.id)); for (let i = 2; taken.has(id); i++) id = (slugify(name) || 'font') + '-' + i;
+  const file = id + '.' + ext; fs.writeFileSync(path.join(FONTS_DIR, file), f.buffer); persist(path.join(FONTS_DIR, file)); l.fonts.push({ id, name, file }); s.lettering = l; saveSettings(s);
+  res.json({ ok: true, font: { id, name, url: `/api/fonts/${id}`, builtin: false }, fonts: allFonts(l) }); });
+app.delete('/api/admin/fonts/:id', adminAuth, (req, res) => { const s = getSettings(); const l = lettering(); const f = l.fonts.find(x => x.id === req.params.id); if (!f) return res.status(404).json({ error: 'only fonts you added can be removed' });
+  l.fonts = l.fonts.filter(x => x !== f); delete l.sizes[f.id]; if (l.font === f.id) l.font = 'pacifico'; s.lettering = l; saveSettings(s); const file = path.join(FONTS_DIR, f.file); fs.rmSync(file, { force: true }); unpersistFile(file);
+  res.json({ ok: true, fonts: allFonts(l) }); });
 app.put('/api/admin/themes/:slug', adminAuth, (req, res) => { const t = readTheme(slugify(req.params.slug)); if (!t) return res.status(404).end(); writeTheme(t.slug, Object.assign(t, req.body, { prompts: Object.assign(t.prompts, req.body.prompts || {}), variantModels: Object.assign(t.variantModels, req.body.variantModels || {}) })); res.json(readTheme(t.slug)); });
 app.delete('/api/admin/themes/:slug', adminAuth, (req, res) => { const d = path.join(THEMES, slugify(req.params.slug)); if (fs.existsSync(d)) { fs.rmSync(d, { recursive: true }); unpersist(d); } res.json({ ok: true }); });
 app.post('/api/admin/themes/:slug/thumb', adminAuth, upload.single('thumb'), async (req, res) => { const t = readTheme(slugify(req.params.slug)); if (!t || !req.file) return res.status(400).end(); if (t.thumbFrom) { t.thumbFrom = ''; writeTheme(t.slug, t); } await sharp(req.file.buffer).rotate().resize(700, 700, { fit: 'inside', withoutEnlargement: true }).png().toFile(path.join(THEMES, t.slug, 'thumb.png')); persist(path.join(THEMES, t.slug, 'thumb.png')); res.json({ ok: true }); });
@@ -639,7 +670,7 @@ app.post('/api/admin/themes/import', adminAuth, upload.single('zip'), async (req
       const st = t.settings; const yes = v => /^(yes|true|on|1)$/i.test(v); 
       const startPrompts = replaceAll ? {} : base.prompts; const th = Object.assign({}, base, { name: existing ? existing.name : t.name, prompts: Object.assign({}, startPrompts, t.prompts), variantModels: Object.assign({}, base.variantModels || {}) });
       if (replaceAll) for (const v of VARIANTS) if (!(v in th.prompts)) th.prompts[v] = '';
-      if (st.rating != null) th.rating = /adult|18/.test(st.rating) ? 'adult' : 'family'; if (st.proportions != null) th.proportions = /big/.test(st.proportions) ? 'bighead' : 'normal';
+      if (st.lettering != null) { const want = String(st.lettering).trim().toLowerCase(); const f = allFonts().find(x => x.id === want || x.name.toLowerCase() === want); th.lettering = f ? f.id : ''; } if (st.rating != null) th.rating = /adult|18/.test(st.rating) ? 'adult' : 'family'; if (st.proportions != null) th.proportions = /big/.test(st.proportions) ? 'bighead' : 'normal';
       if (st.model != null) th.model = st.model; if (st.quality != null) th.quality = st.quality; if (st.moderation != null) th.moderation = st.moderation; if (st.order != null && isFinite(+st.order)) th.order = +st.order; if (st.enabled != null) th.enabled = yes(st.enabled);
       for (const k of Object.keys(st)) { const m = k.match(/^(.+)\.(model|quality)$/); if (!m) continue; const v = variantFor(m[1]); if (!v) continue; th.variantModels[v] = Object.assign({}, th.variantModels[v] || {}, { [m[2]]: st[k] }); }
       writeTheme(slug, th);
@@ -652,7 +683,7 @@ app.get('/api/admin/themes/export', adminAuth, async (req, res) => { // ?slug=ro
   const AdmZip = require('adm-zip'); const zip = new AdmZip(); const which = req.query.slug ? listThemes().filter(t => t.slug === req.query.slug) : listThemes();
   for (const t of which) { const dir = t.name.replace(/[\\/:*?"<>|]/g, '-');
     for (const v of VARIANTS) if (t.prompts[v] && t.prompts[v].trim()) zip.addFile(`${dir}/${VARIANT_FILES[v][0]}.md`, Buffer.from(t.prompts[v], 'utf8'));
-    const lines = [`enabled: ${t.enabled ? 'yes' : 'no'}`, `order: ${t.order || 0}`, `rating: ${t.rating === 'adult' ? 'adult' : 'family'}`, `proportions: ${t.proportions === 'bighead' ? 'bighead' : 'normal'}`]; if (t.model) lines.push('model: ' + t.model); if (t.quality) lines.push('quality: ' + t.quality); if (t.moderation) lines.push('moderation: ' + t.moderation);
+    const lines = [`enabled: ${t.enabled ? 'yes' : 'no'}`, `order: ${t.order || 0}`, `rating: ${t.rating === 'adult' ? 'adult' : 'family'}`, `proportions: ${t.proportions === 'bighead' ? 'bighead' : 'normal'}`]; if (t.lettering) { const f = allFonts().find(x => x.id === t.lettering); if (f) lines.push('lettering: ' + f.name); } if (t.model) lines.push('model: ' + t.model); if (t.quality) lines.push('quality: ' + t.quality); if (t.moderation) lines.push('moderation: ' + t.moderation);
     for (const v of VARIANTS) { const vm = t.variantModels[v] || {}; if (vm.model) lines.push(`${VARIANT_FILES[v][0]}.model: ${vm.model}`); if (vm.quality) lines.push(`${VARIANT_FILES[v][0]}.quality: ${vm.quality}`); }
     zip.addFile(`${dir}/theme.txt`, Buffer.from(lines.join('\n') + '\n', 'utf8'));
     const th = path.join(THEMES, t.slug, 'thumb.png'); if (await ensureLocal(th)) zip.addFile(`${dir}/thumbnail.png`, fs.readFileSync(th)); }

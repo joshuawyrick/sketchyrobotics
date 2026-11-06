@@ -1,0 +1,5 @@
+Name-lettering fonts bundled with Sketchy Robotics (from Google Fonts, via Fontsource, Latin subset):
+  Pacifico, Lobster, Pirata One, Creepster, Black Ops One, Playball, Bebas Neue — SIL Open Font License 1.1 (https://openfontlicense.org)
+  Luckiest Guy — Apache License 2.0
+All of them may be used commercially, including on drawings sold at events.
+public/vendor/opentype.min.js — opentype.js 1.3.4, MIT License (c) Frederik De Bleser

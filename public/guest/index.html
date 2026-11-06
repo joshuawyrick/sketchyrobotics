@@ -136,7 +136,7 @@
   <!-- 2b names -->
   <section class="screen" id="s-names">
     <div class="crumb" id="crumb1b"></div>
-    <h1>Whose portrait is this?</h1><p class="sub">The robot letters the name above the drawing. Leave blank to skip.</p>
+    <h1>Whose portrait is this?</h1><p class="sub">The robot letters the name on your drawing. Leave blank to skip.</p>
     <div class="names" id="nameFields"></div>
     <div class="bar"><button class="btn" id="backNames">Back</button><button class="btn" id="skipNames">Skip</button><button class="btn primary" id="nextNames">Next — take the photo</button></div>
   </section>
@@ -174,10 +174,11 @@
 
   fetch('logo.svg').then(r => r.text()).then(t => { const m = t.match(/<svg[^>]*>([\s\S]*)<\/svg>/); if (m) document.querySelector('header .logo').innerHTML = m[1]; }).catch(() => {});
 
+  let NAMES_ENABLED = false; // Admin → Settings → Guest names turns the name screen on (picked up with the themes every 30 s)
   async function loadThemes() {
     const r = await fetch('/api/themes').then(r => r.json());
     if (S.build && r.build && r.build !== S.build && $('s-theme').classList.contains('on')) { location.reload(); return; } S.build = r.build || S.build; // server was updated: pick up the new page while idle
-    S.themes = r.themes; S.pay = r.pay || null; $('evName').textContent = r.event || ''; S.zoom = +r.cameraZoom || 1.6; S.bots = +r.bots || 1; document.documentElement.style.setProperty('--zoom', S.zoom);
+    NAMES_ENABLED = !!r.names; S.themes = r.themes; S.pay = r.pay || null; $('evName').textContent = r.event || ''; S.zoom = +r.cameraZoom || 1.6; S.bots = +r.bots || 1; document.documentElement.style.setProperty('--zoom', S.zoom);
     const box = $('tiles'); box.innerHTML = '';
     if (!r.themes.length) box.innerHTML = '<p class="sub">No styles are set up yet. Add one in Admin.</p>';
     for (const t of r.themes) {
@@ -221,7 +222,6 @@
     setTimeout(() => { const first = $('nameFields').querySelector('input'); if (first) first.focus(); }, 150);
   }
   const toCam = () => { $('crumb2').textContent = `${S.theme.name} · ${variantLabel()}`; openCam(); show('s-cam'); };
-  const NAMES_ENABLED = false; // name lettering parked for now — set true to bring the name screen back
   $('nextWho').onclick = () => { if (NAMES_ENABLED) { renderNames(); show('s-names'); } else { S.names = {}; toCam(); } };
   $('backNames').onclick = () => show('s-who');
   $('skipNames').onclick = () => { S.names = {}; toCam(); };
