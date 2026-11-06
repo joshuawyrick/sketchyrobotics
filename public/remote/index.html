@@ -56,9 +56,9 @@
     scr.innerHTML = `<h1>${esc(S.theme.name)}</h1><p class="hint">Who's in the photo?</p><div class="opts">${S.theme.variants.map(v => `<div class="opt" data-v="${v}">${esc(S.info.variants[v])}</div>`).join('')}</div><a class="lnk" href="#" id="back">← styles</a>`;
     scr.querySelectorAll('.opt').forEach(o => o.onclick = () => { S.variant = o.dataset.v; photo(); }); $('back').onclick = e => { e.preventDefault(); themes(); }; }
   function photo() { step(3);
-    scr.innerHTML = `<h1>Your photo</h1><p class="hint">Face the camera, good light, nothing covering the face${S.variant.startsWith('2') ? ' — both of you in one photo, in the order you chose' : ''}.</p>
+    scr.innerHTML = `<h1>Your photo</h1><p class="hint">${S.variant === 'pet-only' ? 'Your pet facing the camera, good light, its whole face showing' : 'Face the camera, good light, nothing covering the face'}${S.variant.startsWith('2') ? ' — both of you in one photo, in the order you chose' : ''}.</p>
       <button class="btn primary" id="take">📷 Take a photo</button><div style="height:10px"></div><button class="btn" id="choose">🖼️ Choose from my phone</button>
-      <input type="file" id="takeIn" accept="image/*" capture="user" style="display:none"><input type="file" id="chooseIn" accept="image/*" style="display:none"><a class="lnk" href="#" id="back">← who's in it</a>`;
+      <input type="file" id="takeIn" accept="image/*" capture="${S.variant === 'pet-only' ? 'environment' : 'user'}" style="display:none"><input type="file" id="chooseIn" accept="image/*" style="display:none"><a class="lnk" href="#" id="back">← who's in it</a>`;
     $('take').onclick = () => $('takeIn').click(); $('choose').onclick = () => $('chooseIn').click(); $('back').onclick = e => { e.preventDefault(); who(); };
     const picked = inp => { const f = inp.files[0]; inp.value = ''; if (!f) return; S.file = f; confirm(); }; $('takeIn').onchange = () => picked($('takeIn')); $('chooseIn').onchange = () => picked($('chooseIn')); }
   function confirm() { step(3);

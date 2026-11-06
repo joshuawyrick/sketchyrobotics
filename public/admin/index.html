@@ -108,7 +108,7 @@
       <div id="bSlots" class="slots"></div>
       <h3 class="stepH">3 · Write prompts</h3>
       <div class="row"><label>Text model</label><select id="bModel" style="max-width:220px"></select><button class="primary" id="bWrite">Write all prompts</button><span id="bWriteMsg" class="note"></span></div>
-      <div class="row"><label>Show variant</label><select id="bFlavor" style="width:auto"></select><span class="note">each variant has its own set of 8 prompts, tests, picks and thumbnail</span></div>
+      <div class="row"><label>Show variant</label><select id="bFlavor" style="width:auto"></select><span class="note">each variant has its own set of prompts, tests, picks and thumbnail</span></div>
       <div class="row"><button id="bCheck">Spice check (cheap: one low-quality image per prompt)</button><span id="bCheckMsg" class="note">Shows which prompts the image service accepts. Red ones get a "Dial back" button that rewrites one step tamer.</span></div>
       <div id="bPrompts"></div>
       <h3 class="stepH">4 · Test</h3>
@@ -141,7 +141,7 @@
           <label style="width:auto;margin-left:14px">Text model</label><select id="wModel" style="max-width:220px"></select></div>
         <div class="row" style="align-items:flex-start"><label>Describe the theme</label><textarea id="wDesc" style="flex:1;min-height:70px" placeholder="e.g. 1980s glam-metal rockstar: big teased hair, leather jacket with studs, bandana, holding a Flying-V guitar, stage pose, confident grin"></textarea></div>
         <div class="row"><label>Extra rules (optional)</label><input id="wExtra" style="flex:1" placeholder="e.g. keep the guest's own hairstyle; no sunglasses; pet wears a tiny matching bandana"></div>
-        <div class="row"><button class="primary" id="wOne">Write prompt for this combination</button><button id="wAll">Write all 8 combinations</button><span id="wMsg" class="note"></span></div>
+        <div class="row"><button class="primary" id="wOne">Write prompt for this combination</button><button id="wAll">Write all combinations</button><span id="wMsg" class="note"></span></div>
         <div id="wAllOut" style="display:none"></div>
       </div>
       <div class="row" style="align-items:flex-start"><label>Prompt</label><div style="flex:1"><textarea id="tPrompt" style="width:100%;min-height:150px" placeholder="Write the master prompt here. It is applied to the reference photo exactly as the guest's photo will be."></textarea><div class="note"><span id="tPromptCnt"></span> <button id="tPromptLoad" style="padding:2px 8px;min-height:0;font-size:12px">Load the saved prompt for this combination</button></div></div></div>
@@ -522,7 +522,7 @@
   $('wAll').onclick = async () => { if (!$('wDesc').value.trim()) return toast('Describe the theme first', 'bad'); $('wOne').disabled = $('wAll').disabled = true; $('wMsg').textContent = 'Writing all 8 (they run at the same time)…';
     try { const r = await api('/api/admin/writer', { method: 'POST', json: writerBody(STATE.variantOrder) }); const t = STATE.themes.find(x => x.slug === $('tTheme').value);
       $('wAllOut').style.display = ''; $('wAllOut').innerHTML = `<div class="note" style="margin-top:8px">Review, edit anything, then apply. Applying replaces the prompt in each ticked box of <b>${t ? t.name : 'the theme'}</b>.</div>` + r.results.map(x => `<div class="wItem"><h4><label><input type="checkbox" class="wPick" data-v="${x.variant}" ${x.error ? '' : 'checked'}> ${x.label}</label>${x.error ? ` <span class="bad">✗ ${x.error}</span>` : ''}</h4>${x.error ? '' : `<textarea class="wText" data-v="${x.variant}">${x.prompt.replace(/</g, '&lt;')}</textarea>`}</div>`).join('') + `<div class="row" style="margin-top:8px"><button class="primary" id="wApply">Apply ticked prompts to ${t ? t.name : 'theme'}</button><button id="wDiscard">Discard</button></div>`;
-      $('wMsg').textContent = `${r.results.filter(x => !x.error).length} of 8 written with ${r.model}.`;
+      $('wMsg').textContent = `${r.results.filter(x => !x.error).length} of ${r.results.length} written with ${r.model}.`;
       $('wDiscard').onclick = () => { $('wAllOut').style.display = 'none'; $('wAllOut').innerHTML = ''; };
       $('wApply').onclick = async () => { const prompts = {}; $('wAllOut').querySelectorAll('.wPick:checked').forEach(c => { const ta = $('wAllOut').querySelector(`.wText[data-v="${c.dataset.v}"]`); if (ta) prompts[c.dataset.v] = ta.value; }); if (!Object.keys(prompts).length) return;
         const existing = t ? Object.keys(prompts).filter(v => t.prompts[v] && t.prompts[v].trim()) : []; if (existing.length && !confirm(`${t.name} already has prompts for: ${existing.map(v => STATE.variants[v]).join(', ')}. Replace them?`)) return;

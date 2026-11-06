@@ -129,6 +129,7 @@
       <div class="choice" data-w="1">One person</div>
       <div class="choice" data-w="2">Two people</div>
       <div class="choice" data-w="pet">Person + pet</div>
+      <div class="choice" data-w="petonly">Just my pet</div>
     </div>
     <div id="genders"></div>
     <div class="bar"><button class="btn" id="backWho">Back</button><button class="btn primary" id="nextWho" disabled>Next: take photo</button></div>
@@ -192,10 +193,13 @@
     if (S.who === '1') return S.g.a ? `1-${S.g.a}` : null;
     if (S.who === '2') return (S.g.a && S.g.b) ? `2-${S.g.a}-${S.g.b}` : null;
     if (S.who === 'pet') return S.g.a ? `pet-${S.g.a}` : null;
+    if (S.who === 'petonly') return 'pet-only';
     return null;
   }
   function renderWho() {
-    document.querySelectorAll('#who .choice').forEach(c => { c.classList.toggle('on', c.dataset.w === S.who); c.onclick = () => { S.who = c.dataset.w; S.g = {}; renderWho(); }; });
+    const offered = w => S.theme.variants.some(v => w === '1' ? v.startsWith('1-') : w === '2' ? v.startsWith('2-') : w === 'pet' ? v === 'pet-male' || v === 'pet-female' : v === 'pet-only');
+    if (S.who && !offered(S.who)) S.who = null;
+    document.querySelectorAll('#who .choice').forEach(c => { c.style.display = offered(c.dataset.w) ? '' : 'none'; c.classList.toggle('on', c.dataset.w === S.who); c.onclick = () => { S.who = c.dataset.w; S.g = {}; renderWho(); }; });
     const g = $('genders'); g.innerHTML = '';
     const pair = (key, title) => {
       const d = document.createElement('div'); d.className = 'pair'; d.innerHTML = `<h3>${title}</h3><div class="choices"></div>`;
@@ -215,6 +219,7 @@
     const k = variantKey(); const f = []; S.names = S.names || {};
     if (k.startsWith('1-')) f.push(['a', 'Your name']);
     else if (k.startsWith('2-')) { f.push(['a', 'Name of the person on the LEFT']); f.push(['b', 'Name of the person on the RIGHT']); }
+    else if (k === 'pet-only') f.push(['pet', "Your pet's name"]);
     else if (k.startsWith('pet-')) { f.push(['a', 'Your name']); f.push(['pet', "Your pet's name"]); }
     $('crumb1b').textContent = `${S.theme.name} · ${variantLabel()}`;
     $('nameFields').innerHTML = f.map(([key, label]) => `<label class="nameField"><span>${label}</span><input type="text" data-k="${key}" maxlength="24" autocomplete="off" autocapitalize="words" placeholder="optional" value="${(S.names[key] || '').replace(/"/g, '&quot;')}"></label>`).join('');
@@ -226,11 +231,13 @@
   $('backNames').onclick = () => show('s-who');
   $('skipNames').onclick = () => { S.names = {}; toCam(); };
   $('nextNames').onclick = () => { document.activeElement && document.activeElement.blur(); toCam(); };
-  function variantLabel() { const k = variantKey(); return ({ '1-male': 'one male', '1-female': 'one female', '2-male-male': 'two males', '2-female-female': 'two females', '2-male-female': 'male + female', '2-female-male': 'female + male', 'pet-male': 'male + pet', 'pet-female': 'female + pet' })[k] || k; }
+  function variantLabel() { const k = variantKey(); return ({ '1-male': 'one male', '1-female': 'one female', '2-male-male': 'two males', '2-female-female': 'two females', '2-male-female': 'male + female', '2-female-male': 'female + male', 'pet-male': 'male + pet', 'pet-female': 'female + pet', 'pet-only': 'just the pet' })[k] || k; }
+  const camTipText = () => variantKey() === 'pet-only' ? 'Get your pet in the oval, then tap the blue button' : 'Get your face in the oval, then tap the blue button';
 
   const COUNTDOWN = 3;
   async function openCam() {
     $('shot').style.display = 'none'; $('video').style.display = ''; $('guide').style.display = ''; $('shutter').style.display = ''; $('shutter').disabled = false; $('camTip').style.display = ''; $('count').className = 'count'; $('camBar').style.display = ''; $('shotBar').style.display = 'none'; S.blob = null;
+    $('camTip').textContent = camTipText(); // "your pet" for Just my pet, "your face" otherwise — reset each time, the camera stays open between guests
     if (streamAlive()) { $('video').srcObject = S.stream; return; } S.stream = null;
     // 4:3 at the front camera's native framing; the <video> is shown cover-cropped so the face fills the screen
     const portrait = window.innerHeight > window.innerWidth; S.camPortrait = portrait;
@@ -240,7 +247,7 @@
       ? [{ video: { facingMode: 'user', width: { ideal: 3024 }, height: { ideal: 4032 }, aspectRatio: { ideal: 3 / 4 } }, audio: false }, { video: { facingMode: 'user', width: { ideal: 1440 }, height: { ideal: 1920 } }, audio: false }, { video: { facingMode: 'user' }, audio: false }, { video: true, audio: false }]
       : [{ video: { facingMode: 'user', width: { ideal: 4032 }, height: { ideal: 3024 }, aspectRatio: { ideal: 4 / 3 } }, audio: false }, { video: { facingMode: 'user', width: { ideal: 1920 }, height: { ideal: 1440 } }, audio: false }, { video: { facingMode: 'user' }, audio: false }, { video: true, audio: false }];
     for (const c of tries) { try { S.stream = await navigator.mediaDevices.getUserMedia(c); break; } catch (e) { S.camErr = e; } }
-    if (S.stream) { $('video').srcObject = S.stream; $('camTip').textContent = 'Get your face in the oval, then tap the blue button'; }
+    if (S.stream) { $('video').srcObject = S.stream; $('camTip').textContent = camTipText(); }
     else { $('shutter').style.display = 'none'; $('guide').style.display = 'none'; $('camTip').textContent = 'Camera not available — use "Use a photo instead"'; }
   }
   // The camera stays on while a guest is posing/reviewing, and is released on the status screen so the

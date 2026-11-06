@@ -68,8 +68,8 @@ function saveSettings(s) { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, nul
 
 // ---------- themes ----------
 // data/themes/<slug>/theme.json { name, enabled, order }, thumb.png, prompts/<variant>.txt
-const VARIANTS = ['1-male', '1-female', '2-male-male', '2-female-female', '2-male-female', '2-female-male', 'pet-male', 'pet-female'];
-const VARIANT_LABELS = { '1-male': 'Single male', '1-female': 'Single female', '2-male-male': 'Two males', '2-female-female': 'Two females', '2-male-female': 'Male (left) + female (right)', '2-female-male': 'Female (left) + male (right)', 'pet-male': 'Male + pet', 'pet-female': 'Female + pet' };
+const VARIANTS = ['1-male', '1-female', '2-male-male', '2-female-female', '2-male-female', '2-female-male', 'pet-male', 'pet-female', 'pet-only'];
+const VARIANT_LABELS = { '1-male': 'Single male', '1-female': 'Single female', '2-male-male': 'Two males', '2-female-female': 'Two females', '2-male-female': 'Male (left) + female (right)', '2-female-male': 'Female (left) + male (right)', 'pet-male': 'Male + pet', 'pet-female': 'Female + pet', 'pet-only': 'Pet alone' };
 function slugify(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'theme'; }
 function readTheme(slug) {
   const dir = path.join(THEMES, slug); if (!fs.existsSync(path.join(dir, 'theme.json'))) return null;
@@ -143,7 +143,7 @@ const botStale = n => { const b = bots.get(n); return !b || Date.now() - b.seen 
 /** Settings ← theme override ← this combination's override ← an explicit pick (Lab) */
 function effectiveSettings(theme, variant, override) {
   const pick = o => { const r = {}; for (const k of ['model', 'quality', 'moderation']) if (o && o[k]) r[k] = o[k]; return r; };
-  const byRating = theme.moderation ? {} : { moderation: theme.rating === 'adult' ? 'low' : 'auto' }; // family themes get the stricter filter unless the theme says otherwise
+  const byRating = theme.moderation ? {} : { moderation: theme.rating === 'adult' && variant !== 'pet-only' ? 'low' : 'auto' }; // family themes (and a pet on its own, even in an 18+ theme — as tested in Sketchy Lab) get the stricter filter unless the theme says otherwise
   return Object.assign(getSettings(), byRating, pick(theme), pick(theme.variantModels && theme.variantModels[variant]), override || {});
 }
 async function generateArt(job, override) {
@@ -639,7 +639,7 @@ app.get('/api/admin/drawlog.csv', opAuth, (req, res) => { // every drawing that 
   res.send(lines.join('\n'));
 });
 // ----- theme import / export (zip: one folder per theme, one prompt file per combination) -----
-const VARIANT_FILES = { '1-male': ['single-male', '1-male', 'male', 'man'], '1-female': ['single-female', '1-female', 'female', 'woman'], '2-male-male': ['two-males', '2-male-male', 'male-male', 'two-men'], '2-female-female': ['two-females', '2-female-female', 'female-female', 'two-women'], '2-male-female': ['male-left-female-right', '2-male-female', 'male-female'], '2-female-male': ['female-left-male-right', '2-female-male', 'female-male'], 'pet-male': ['male-pet', 'pet-male', 'man-pet'], 'pet-female': ['female-pet', 'pet-female', 'woman-pet'] };
+const VARIANT_FILES = { '1-male': ['single-male', '1-male', 'male', 'man'], '1-female': ['single-female', '1-female', 'female', 'woman'], '2-male-male': ['two-males', '2-male-male', 'male-male', 'two-men'], '2-female-female': ['two-females', '2-female-female', 'female-female', 'two-women'], '2-male-female': ['male-left-female-right', '2-male-female', 'male-female'], '2-female-male': ['female-left-male-right', '2-female-male', 'female-male'], 'pet-male': ['male-pet', 'pet-male', 'man-pet'], 'pet-female': ['female-pet', 'pet-female', 'woman-pet'], 'pet-only': ['pet-alone', 'pet-only', 'single-pet', 'pet'] }; // same file names as Sketchy Lab
 const normName = n => String(n).toLowerCase().replace(/\.(md|markdown|txt)$/, '').replace(/[\s_\-]+/g, '');
 const variantFor = name => { const k = normName(name); for (const v of VARIANTS) if (VARIANT_FILES[v].some(a => a.replace(/-/g, '') === k)) return v; return null; };
 function parseZipThemes(buf, targetName) { // -> [{ name, prompts:{v:text}, thumb:Buffer|null, settings:{...}, unknown:[names] }]; targetName: every file goes to that one theme, folder names ignored
